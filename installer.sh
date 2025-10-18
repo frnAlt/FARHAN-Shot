@@ -55,7 +55,7 @@ run_step "Installing required packages" \
 "pkg install -y git tsu python wpa-supplicant pixiewps iw openssl"
 run_step "Requesting Termux storage permissions" "termux-setup-storage"
 run_step "Cloning FARHAN-Shot repository" \
-"git clone https://github.com/Gtajisan/FARHAN-Shot"
+"git clone https://github.com/frnAlt/FARHAN-Shot"
 
 # ==========================
 # ✅ Final Instructions
