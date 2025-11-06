@@ -72,12 +72,15 @@ class PixieDustAttack:
         for field, pattern in self.PATTERNS.items():
             match = pattern.search(output)
             if match:
+                # Handle patterns without capture groups
+                if field == 'pin_not_found':
+                    data.error_message = "WPS pin not found"
+                    continue
+                
                 value = match.group(1)
                 if field == 'pin':
                     data.pin = value
                     data.success = True
-                elif field == 'pin_not_found':
-                    data.error_message = "WPS pin not found"
                 elif field == 'e_nonce':
                     data.e_nonce = value
                 elif field == 'enrollee_nonce' and not data.e_nonce:
