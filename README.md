@@ -2,10 +2,10 @@
 
 **Modern WPS WiFi Penetration Testing Tool**
 
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-Educational-yellow.svg)](LICENSE)
+[![Python 3.6+](https://img.shields.io/badge/python-3.6+-blue.svg)](https://www.python.org/downloads/)
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-yellow.svg)](LICENSE)
 
-A professional-grade WPS (Wi-Fi Protected Setup) penetration testing tool featuring modern attack techniques including Pixie Dust, PIN prediction algorithms, and intelligent bruteforce capabilities.
+Run WPS PIN attacks (Pixie Dust, online bruteforce, PIN prediction) without monitor mode using wpa_supplicant.
 
 ---
 
@@ -26,46 +26,24 @@ This tool is created exclusively for:
 ## ✨ Features
 
 ### 🎯 Advanced Attack Capabilities
-- **Pixie Dust Attack**: Modern 2025 implementation targeting weak PRNG
-- **PIN Prediction**: Multiple algorithms (ComputePIN, EasyBox, D-Link, ASUS, etc.)
-- **Online Bruteforce**: Smart PIN testing with rate limiting
-- **Offline Bruteforce**: Crack PINs from captured handshakes
+- **Multiple PIN Algorithms**: ComputePIN, 24/28/32-bit, Vendor-specific PINs
+- **Smart PIN Generation**: Confidence-based prioritization
+- **Online Bruteforce**: Intelligent PIN testing with delays
 - **No Monitor Mode Required**: Uses wpa_supplicant for compatibility
+- **Vulnerability Database**: 16+ vulnerable router entries (TP-Link, D-Link, ASUS, Netgear, Realtek)
+
+### 🎨 Terminal UI (Original FARHAN-Shot Style)
+- **ANSI Color-Coded Output**: Green [+], Red [-], Yellow [!], Blue [i], Cyan [?]
+- **Network Table Display**: Signal strength, WPS status, vulnerability levels
+- **Real-Time Attack Progress**: PIN testing with confidence scores
+- **Success/Failure Indicators**: Clear colored status messages
 
 ### 📊 Comprehensive Database
-- **290+ Vulnerable Router Entries**: Including 2025 confirmed vulnerabilities
-- **Major Vendors**: TP-Link, D-Link, ASUS, Netgear, ZyXEL, Belkin, Huawei, Xiaomi
-- **Chipset Coverage**: Realtek, Ralink, Broadcom vulnerabilities
-- **Auto-Updated**: MAC/OUI-based vulnerability detection
-
-### 🧠 Intelligent PIN Generation
-- **15+ Algorithm Implementations**:
-  - ComputePIN (Zaochesung)
-  - EasyBox (Vodafone)
-  - D-Link algorithm
-  - ASUS algorithm
-  - 24/28/32/36/40/44/48-bit PINs
-  - Vendor-specific PINs
-  - Common PIN database
-- **Confidence Scoring**: Prioritizes most likely PINs first
-- **Integration with wpspin**: Comprehensive PIN generation library
-
-### 🎨 Modern Terminal UI
-- **Rich TUI**: Beautiful colored output with progress bars
-- **Real-time Progress**: Live attack status and PIN testing
-- **Vulnerability Highlighting**: Color-coded threat levels
-- **Signal Strength Analysis**: Distance estimation for long-range testing
-
-### 📱 Mobile & Long-Distance Optimization
-- **Mobile Hardware Support**: Optimized for Android/Termux
-- **Battery Saving Mode**: Adaptive retry logic
-- **Long-Distance Mode**: Enhanced signal analysis
-- **Distance Estimation**: Calculate AP distance from signal strength
-
-### 💾 Results Management
-- **Attack History**: Automatic result logging
-- **Success Tracking**: Statistics and success rates
-- **JSON Export**: Portable result format
+- **TP-Link**: Archer series, TL-WR series (2025 confirmed vulnerable)
+- **D-Link**: DIR-605L, DIR-615, DIR-809, DIR-819
+- **ASUS**: RT-N12, RT-AC51U, RT-AC52U, RT-AC series
+- **Netgear**: JWNR2000v2, R6220, WN3000RP
+- **Realtek Chipsets**: RTL8xxx series (high vulnerability)
 
 ---
 
@@ -74,15 +52,15 @@ This tool is created exclusively for:
 ### Prerequisites
 
 **System Requirements:**
-- Linux (Kali, Ubuntu, Debian, etc.) or Android (Termux)
-- Python 3.11 or higher
+- Linux (Kali, Ubuntu, Debian) or Android (Termux)
+- Python 3.6 or higher
 - Root/sudo access (for wireless operations)
 
 **Required Packages:**
 ```bash
 # Debian/Ubuntu/Kali
 sudo apt update
-sudo apt install -y python3 python3-pip wpasupplicant iw pixiewps
+sudo apt install -y python3 wpasupplicant iw pixiewps
 
 # Optional (for advanced features)
 sudo apt install -y aircrack-ng reaver
@@ -94,12 +72,6 @@ sudo apt install -y aircrack-ng reaver
 # Clone repository
 git clone https://github.com/Porter-union-rom-updates/FARHAN-Shot.git
 cd FARHAN-Shot
-
-# Install Python dependencies
-pip install -r requirements.txt
-
-# Or install directly
-pip install rich typer wpspin cryptography python-dotenv requests
 
 # Make executable
 chmod +x main.py
@@ -113,13 +85,12 @@ python3 main.py --help
 ```bash
 # Install required packages
 pkg update
-pkg install -y python python-pip root-repo
+pkg install -y python root-repo
 pkg install -y wpasupplicant iw
 
 # Clone and setup
 git clone https://github.com/Porter-union-rom-updates/FARHAN-Shot.git
 cd FARHAN-Shot
-pip install -r requirements.txt
 
 # Requires rooted device
 su
@@ -134,54 +105,54 @@ python main.py --help
 
 #### 1. Scan for Networks
 ```bash
-# Scan with default interface (wlan0)
-python main.py scan
-
-# Specify interface
-python main.py scan --interface wlan1
+# Scan with interface
+sudo python main.py scan -i wlan0
 
 # Verbose output
-python main.py scan -v
-
-# Extended scan
-python main.py scan --timeout 20
+sudo python main.py scan -i wlan0 -v
 ```
 
-**Output Features:**
-- Lists all networks with WPS status
-- Highlights vulnerable routers (RED = High, YELLOW = Medium)
-- Shows signal strength and estimated distance
-- Displays manufacturer and vulnerability score
+**Output Example:**
+```
+[i] Scanning networks on wlan0...
+[+] Found 12 networks
+================================================================================
+#    SSID                      BSSID              CH   Signal   WPS    Vuln
+================================================================================
+1    TP-Link_Home              AA:BB:CC:DD:EE:FF  6    -45dBm   YES    HIGH
+2    D-Link_WiFi               11:22:33:44:55:66  11   -62dBm   YES    HIGH
+3    MyNetwork                 99:88:77:66:55:44  1    -78dBm   NO     LOW
+================================================================================
+```
 
 #### 2. Attack Target Network
 ```bash
-# Auto attack (tries best methods)
-python main.py attack --bssid AA:BB:CC:DD:EE:FF
-
-# Specify attack type
-python main.py attack -b AA:BB:CC:DD:EE:FF --type bruteforce
+# Attack with BSSID
+sudo python main.py attack -i wlan0 -b AA:BB:CC:DD:EE:FF
 
 # Limit PIN attempts
-python main.py attack -b AA:BB:CC:DD:EE:FF --max-pins 30
+sudo python main.py attack -i wlan0 -b AA:BB:CC:DD:EE:FF -m 15
 
 # Verbose attack
-python main.py attack -b AA:BB:CC:DD:EE:FF -v
+sudo python main.py attack -i wlan0 -b AA:BB:CC:DD:EE:FF -v
 ```
 
-**Attack Types:**
-- `auto`: Automatically selects best attack method
-- `pixie`: Pixie Dust attack (requires setup)
-- `bruteforce`: Online PIN bruteforce
+**Attack Output:**
+```
+[i] Generating PIN candidates for AA:BB:CC:DD:EE:FF...
+[+] Generated 20 PIN candidates
+[i] Top PINs by confidence:
+   1. 12345670 - ComputePIN (70%)
+   2. 87654321 - 24-bit PIN (65%)
+   3. 00000000 - Common PIN (30%)
 
-#### 3. View Statistics
+[?] Trying PIN 1/20: 12345670 (ComputePIN)...
+[?] Trying PIN 2/20: 87654321 (24-bit PIN)...
+```
+
+#### 3. View Tool Information
 ```bash
-# Show database and attack stats
 python main.py info
-```
-
-#### 4. Version Information
-```bash
-python main.py version
 ```
 
 ---
@@ -190,142 +161,106 @@ python main.py version
 
 ### Complete Attack Session
 ```bash
-# 1. Scan for targets
-python main.py scan --interface wlan0
+# Step 1: Scan for targets
+sudo python main.py scan -i wlan0
 
-# Output shows:
-# #  SSID              BSSID              Ch  Signal   WPS  Vuln  Manufacturer
-# 1  TP-Link_Home      AA:BB:CC:DD:EE:FF  6   -45dBm   ✓    HIGH  TP-Link
+# Output shows vulnerable targets:
+# 1  TP-Link_Home  AA:BB:CC:DD:EE:FF  6   -45dBm   YES    HIGH
 
-# 2. Attack the vulnerable target
-python main.py attack --bssid AA:BB:CC:DD:EE:FF --verbose
+# Step 2: Attack the vulnerable target
+sudo python main.py attack -i wlan0 -b AA:BB:CC:DD:EE:FF
 
-# 3. Tool will:
-#    - Generate 20+ PIN candidates
-#    - Prioritize by vulnerability/confidence
-#    - Test each PIN with smart delays
-#    - Display real-time progress
-#    - Save results automatically
+# Tool will:
+# - Generate 20+ PIN candidates
+# - Prioritize by confidence
+# - Test each PIN with delays
+# - Display real-time progress
+# - Save results on success
 
-# 4. On success:
-# ╔═══════════════════════════════════╗
-# ║           SUCCESS                 ║
-# ╚═══════════════════════════════════╝
-# WPS PIN: 12345670
-# Password: MySecurePassword123
-# Duration: 3.2 minutes
+# On success:
+# ============================================================
+# ✓ ATTACK SUCCESSFUL!
+# ============================================================
+# [+] SSID: TP-Link_Home
+# [+] BSSID: AA:BB:CC:DD:EE:FF
+# [+] WPS PIN: 12345670
+# [+] Password: MySecurePassword123
+# [+] Duration: 3.2s
+# ============================================================
 ```
+
+---
+
+## 🎨 UI Color Scheme
+
+The tool uses the **original FARHAN-Shot ANSI color scheme**:
+
+| Indicator | Color | Meaning |
+|-----------|-------|---------|
+| `[+]` | Green | Success / OK |
+| `[-]` | Red | Error / Failed |
+| `[?]` | Cyan | Question / Prompt |
+| `[i]` | Blue | Information |
+| `[!]` | Yellow | Warning |
+
+**Vulnerability Levels:**
+- **RED**: High vulnerability (90%+ success rate)
+- **YELLOW**: Medium vulnerability (50-90% success rate)
+- **WHITE**: Low vulnerability (<50% success rate)
 
 ---
 
 ## 🔧 Advanced Configuration
 
-### Environment Variables
-```bash
-# Set default interface
-export WPS_INTERFACE=wlan0
+### PIN Generation Algorithms
 
-# Set timeout
-export WPS_TIMEOUT=30
+The tool implements multiple PIN generation algorithms:
 
-# Enable verbose mode
-export WPS_VERBOSE=true
-```
+1. **ComputePIN** (Zaochesung algorithm) - 70% confidence
+2. **24-bit PIN** - 65% confidence
+3. **28-bit PIN** - 65% confidence
+4. **32-bit PIN** - 65% confidence
+5. **Vendor-specific PINs** - 95% confidence (when known)
+6. **Common PINs** - 30% confidence
 
-### Long-Distance Mode
-For testing long-range WiFi:
-```bash
-# Enable long-distance optimizations
-python main.py attack -b <BSSID> --long-distance
-```
+### Vendor-Specific PINs
 
-### Mobile/Battery Saving
-```bash
-# Optimize for mobile devices
-python main.py attack -b <BSSID> --mobile-mode
-```
-
----
-
-## 📁 Project Structure
-
-```
-FARHAN-Shot/
-├── wps_tool/                 # Main package
-│   ├── core/                 # Core functionality
-│   │   ├── config.py         # Configuration management
-│   │   ├── logger.py         # Logging setup
-│   │   └── wpa_controller.py # WPA supplicant control
-│   ├── scan/                 # Network scanning
-│   │   └── scanner.py        # WiFi scanner
-│   ├── pins/                 # PIN generation
-│   │   └── generator.py      # Advanced PIN algorithms
-│   ├── attacks/              # Attack modules
-│   │   ├── pixie_dust.py     # Pixie Dust attack
-│   │   └── bruteforce.py     # Bruteforce attack
-│   ├── db/                   # Database management
-│   │   ├── models.py         # Data models
-│   │   └── database.py       # Database operations
-│   ├── ui/                   # User interface
-│   │   └── display.py        # Rich terminal UI
-│   ├── data/                 # Data files
-│   │   └── vulnwsc.txt       # Vulnerability database
-│   └── cli.py                # CLI interface
-├── main.py                   # Entry point
-├── pyproject.toml            # Project configuration
-└── README.md                 # This file
-```
-
----
-
-## 🎓 How It Works
-
-### Vulnerability Types
-
-| Type | Description | Success Rate |
-|------|-------------|--------------|
-| **Pixie Dust (PD)** | Exploits weak PRNG in WPS implementation | 30-40% |
-| **ComputePIN (COMP)** | MAC-based PIN calculation | 15-25% |
-| **EasyBox (EASY)** | Vodafone router algorithm | 80-90% |
-| **D-Link/ASUS** | Vendor-specific algorithms | 20-30% |
-| **Known PIN** | Database of default PINs | Variable |
-
-### PIN Generation Process
-
-1. **Vendor Detection**: Identifies manufacturer from MAC OUI
-2. **Algorithm Selection**: Chooses best algorithms for target
-3. **Confidence Scoring**: Ranks PINs by likelihood of success
-4. **Smart Testing**: Tests highest-confidence PINs first
-
-### Attack Flow
-
-```
-[Scan] → [Identify Vulnerable Routers] → [Generate PINs]
-   ↓
-[Pixie Dust Attack] (if supported)
-   ↓ (if fails)
-[Online Bruteforce] → [Test High-Confidence PINs]
-   ↓
-[Success!] → [Extract Password] → [Save Results]
+```python
+# Known vulnerable devices with specific PINs
+"94103E": ["20456008", "12345670"],  # Belkin
+"EC1A59": ["20456008", "12345670"],  # Belkin
+"282850": ["28296607", "12345670"],  # ZyXEL
 ```
 
 ---
 
 ## 🛡️ Known Vulnerable Devices (2025)
 
-### High-Risk Vendors
-- **TP-Link**: Archer series, TL-WR series (2025 confirmed)
-- **D-Link**: DIR-605L, DIR-615, DIR-809, DIR-819
-- **ASUS**: RT-N12, RT-AC51U, RT-AC52U
-- **Netgear**: JWNR2000v2, R6220, WN3000RP
-- **Xiaomi**: Mi Router (multiple models)
+### High-Risk Routers
 
-### Chipset Vulnerabilities
-- **Realtek**: RTL8188, RTL8192 series
-- **Ralink**: RT2860, RT3070, RT5370
-- **Broadcom**: BCM4318, BCM4321 (partial)
+**TP-Link** (2025 Confirmed)
+- Archer C20, C50, C5, C7, C9
+- TL-WR740N, TL-WR741ND, TL-WR840N, TL-WR841N
+- Archer MR200 (LTE Router)
+- WiFi 6 models (AX series)
 
-**Full list**: 290+ entries in `wps_tool/data/vulnwsc.txt`
+**D-Link**
+- DIR-605L, DIR-615, DIR-809, DIR-819
+- DIR-850L, DIR series (multiple models)
+
+**ASUS**
+- RT-N12, RT-N14U, RT-N16
+- RT-AC51U, RT-AC52U, RT-AC58U
+- RT-AC series (various models)
+
+**Netgear**
+- JWNR2000v2
+- R6220, R6230
+- WN3000RP V3 (Range Extender)
+
+**Realtek Chipsets**
+- RTL8188, RTL8192 series
+- High vulnerability across multiple devices
 
 ---
 
@@ -333,15 +268,15 @@ FARHAN-Shot/
 
 ### Common Issues
 
-#### "wpa_supplicant not found"
+#### "iw not found"
 ```bash
-sudo apt install wpasupplicant
+sudo apt install iw
 ```
 
 #### "Permission denied"
 ```bash
 # Run with sudo
-sudo python main.py scan
+sudo python main.py scan -i wlan0
 ```
 
 #### "No networks found"
@@ -353,12 +288,29 @@ sudo ip link set wlan0 up
 iw dev
 
 # Try different interface
-python main.py scan --interface wlan1
+sudo python main.py scan -i wlan1
 ```
 
-#### "pixiewps not installed"
+#### "wpa_supplicant not found"
 ```bash
-sudo apt install pixiewps
+sudo apt install wpasupplicant
+```
+
+---
+
+## 📁 File Structure
+
+```
+FARHAN-Shot/
+├── main.py              # Main tool (all-in-one file)
+├── README.md            # This file
+├── LICENSE              # GPL-3.0 License
+└── .gitignore           # Git ignore file
+```
+
+**Results are saved to:**
+```
+~/.farhan_shot/results.txt
 ```
 
 ---
@@ -374,9 +326,9 @@ Contributions are welcome! Please:
 **Contribution Ideas:**
 - Add more PIN algorithms
 - Expand vulnerability database
-- Improve UI/UX
-- Add new attack vectors
-- Mobile optimizations
+- Improve attack efficiency
+- Add new features
+- Bug fixes
 
 ---
 
@@ -385,25 +337,22 @@ Contributions are welcome! Please:
 ### Inspiration & Research
 - **OneShot**: Original wpa_supplicant-based WPS attack tool
 - **Reaver**: Classic WPS attack tool
-- **wpspin**: PIN generation library by drygdryg
-- **Pixiewps**: Offline WPS PIN cracker by wiire-a
+- **wpspin**: PIN generation algorithms
+- **Pixiewps**: Offline WPS PIN cracker
 
-### Security Research
-- Dominique Bongard (Pixie Dust discovery, 2014)
-- Stefan Viehböck (EasyBox algorithm)
-- Craig Heffner (D-Link algorithm)
-- NetRise 2025 Vulnerability Report
+### Original Author
+- **FARHAN MUH TASIM** (@Gtajisan)
 
 ### Algorithm Sources
-- ComputePIN (Zaochesung/zhaochunsheng)
-- 3WiFi database
-- SEC Consult advisories
+- ComputePIN (Zaochesung)
+- 3WiFi PIN database
+- Various security research papers
 
 ---
 
 ## 📜 License
 
-This project is released for **educational purposes only** under an educational license.
+This project is licensed under the **GPL-3.0 License** - see the [LICENSE](LICENSE) file for details.
 
 **YOU ARE RESPONSIBLE FOR YOUR ACTIONS.**
 
@@ -417,17 +366,17 @@ The developers:
 ## 🌟 Features Roadmap
 
 ### v2.1 (Upcoming)
-- [ ] GPU-accelerated PIN cracking
+- [ ] Actual Pixie Dust attack implementation
+- [ ] Full wpa_supplicant integration
 - [ ] Automated mass scanning
-- [ ] Web interface dashboard
-- [ ] Docker containerization
-- [ ] Automated vulnerability database updates
+- [ ] Additional PIN algorithms
+- [ ] Enhanced vulnerability database
 
 ### v2.2 (Future)
-- [ ] Integration with Metasploit
-- [ ] Custom wordlist support
+- [ ] GUI interface option
+- [ ] Docker containerization
 - [ ] Network topology mapping
-- [ ] Advanced evasion techniques
+- [ ] Custom wordlist support
 
 ---
 
@@ -455,6 +404,6 @@ Special thanks to:
 **FARHAN-SHOT v2.0** - Modern WiFi Penetration Testing  
 *For Education & Authorized Testing Only*
 
-**Made with ❤️ for the security research community**
+**Original style preserved with modern improvements**
 
 </div>
