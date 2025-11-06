@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wps-toolkit"
+version = "1.0.0"
+description = "Professional WPS penetration testing toolkit"
+authors = [{name = "Farhan"}]
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "colorama>=0.4.6",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "--cov=src --cov-report=term-missing --cov-report=html"
