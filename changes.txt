@@ -1,0 +1,668 @@
+================================================================
+  FARHAN-Shot — Full Changelog & Commit History
+  Repository: github.com/Gtajisan/FARHAN-Shot
+================================================================
+
+----------------------------------------------------------------
+LATEST — v3.4.0: OneShot-Extended (OSE) feature integration
+Hash   : (pending)
+----------------------------------------------------------------
+SUMMARY:
+  Merged 15 features from OneShot-Extended (chickendrop89) into
+  main.py without removing any existing FARHAN-Shot logic.
+  Tool version bumped to 3.4.0.
+
+CHANGES IN main.py:
+  [PixiewpsData]
+  - Added `e_bssid` slot to PixiewpsData.__slots__
+  - Added --e-bssid flag to get_pixie_cmd(); set automatically
+    from current BSSID before each pixiewps run (__runPixiewps)
+
+  [ConnectionStatus]
+  - Added `del_station_count` slot to track AP de-auth events
+
+  [Pixie Dust engine]
+  - Added mode 5 (D-Link/Realtek-v2) to _MLABELS and
+    _ordered_modes in the chipset-hint pixiewps pass
+
+  [WPS handler — __handle_wpas]
+  - M2D (WPS Message 2D) detection: sets status WPS_FAIL and
+    prints a diagnostic when the AP rejects enrollment
+  - NL80211_CMD_DEL_STATION counter: warns after 5 de-auth
+    events, indicating rate-limiting or WPS lockout
+
+  [WPS connection loop — __wps_connection]
+  - Interface-up guard: aborts early if the wireless interface
+    disappears mid-exchange (/sys/class/net/<iface> check)
+
+  [single_connection — Pixie Dust success path]
+  - Auto-adds Pixie-Dusted AP to vulnwsc.txt (vuln_list_file)
+  - Auto-saves cracked credentials to NetworkManager or Android
+    WiFi when --save-ap is used
+
+  [single_connection — GOT_PSK handler]
+  - Calls NetworkManager.save_ap() on any PIN-crack success
+    when --save-ap is active
+
+  [NetworkManager]
+  - New static method save_ap(essid, password, is_android=False):
+    persists cracked AP via nmcli on Linux or Android cmd wifi
+
+  [Companion.__init__]
+  - Reads _vuln_list_file and _save_ap from advanced_options
+
+  [Module-level helpers added after ifaceUp]
+  - _add_to_vuln_list()          : appends entry to vulnwsc.txt
+  - _get_interfering_processes() : finds NM/dhclient via netlink
+  - _kill_interfering_processes(): kills them, saves list to /tmp
+  - _restore_killed_processes()  : re-launches saved processes
+
+  [New CLI arguments]
+  - -N / --null-pin        : force PIN 00000000
+  - -k / --kill            : kill interfering processes pre-attack
+  - --restore-procs        : atexit-restore processes killed by -k
+  - --save-ap              : save cracked AP to NM / Android WiFi
+  - -D / --dont-touch-settings: skip Android WiFi disable/restore
+
+  [Main loop]
+  - null_pin applied before attack (args.pin = '00000000')
+  - kill/restore_procs wired up with atexit
+  - vuln_list_file + save_ap passed into _advanced_options
+  - Android disableWifi/enableWifi gated on dont_touch_settings
+
+  [usage() string]
+  - Documents all new flags with examples
+  - Version line updated to v3.4.0 + OSE attribution
+
+  [Module docstring]
+  - Version bumped to v3.4.0
+  - OSE credit line added
+
+----------------------------------------------------------------
+COMMIT 1 — Initial commit
+Hash   : cc03321
+----------------------------------------------------------------
+- First working version of FARHAN-Shot uploaded to the repository.
+- Based on the original OneShot 0.0.2 tool (c) 2017 rofl0r.
+- Included main.py, colors.py (separate color definitions file),
+  installer.sh, setup.py, update.py, vulnwsc.txt, vulnwsc.py,
+  vulnwsc_original.txt, FARHAN-Shot.sh, LICENSE, and README.md.
+- All files were placed inside the FARHAN-Shot/ subdirectory.
+
+----------------------------------------------------------------
+COMMIT 2 — Update script to launch the main program with specified
+           network interface
+Hash   : 6050751
+----------------------------------------------------------------
+- Updated the launch/runner shell script (FARHAN-Shot.sh) to
+  correctly pass the network interface argument when starting
+  main.py.
+- Minor configuration fix to ensure Termux and Linux compatibility
+  on startup.
+
+----------------------------------------------------------------
+COMMIT 3 — Integrate color definitions directly into main script
+           and remove separate file
+Hash   : 6e171cb
+----------------------------------------------------------------
+WHAT WAS CHANGED:
+- Removed the separate colors.py file entirely.
+- All ANSI terminal color variables that were previously imported
+  from colors.py are now defined inline at the top of main.py.
+  This includes: red, green, yellow, blue, magenta, cyan,
+  light_gray, dark_gray, light_red, light_green, light_yellow,
+  light_blue, light_magenta, light_cyan, white, reset, all bg_*
+  background variants, bold, dim, underline, blink, reverse, hidden,
+  and their uppercase aliases (RED, GREEN, YELLOW, etc.).
+
+WHY:
+- Eliminates the external dependency on colors.py so the script
+  runs as a single self-contained file.
+- Prevents import errors when colors.py is missing or moved.
+
+----------------------------------------------------------------
+COMMIT 4 — Add new PIN algorithms and integrate a static PIN
+           database for enhanced network scanning
+Hash   : b2e032f
+----------------------------------------------------------------
+NEW FEATURES ADDED:
+
+1. pins.csv — Static PIN Database
+   - Copied pins.csv (3,336 entries) from the fulvius31/OneShot
+     reference repository.
+   - Each row maps a MAC OUI prefix to one or more known default
+     WPS PINs for that vendor/model.
+   - New method: append_from_pin_csv(pin_file_path, mac)
+     Reads pins.csv, strips colons from both the stored prefix and
+     the target MAC for reliable matching, and loads any matching
+     PINs into the pinGeneric static list before the suggestion
+     loop runs.
+
+2. ALGO_STATIC_DB — New Algorithm Mode Constant
+   - Added ALGO_STATIC_DB = 3 as a new algorithm mode alongside
+     the existing ALGO_MAC and ALGO_RANGE modes.
+   - Used exclusively by pinGeneric to signal that PINs come from
+     the CSV database rather than being computed from the MAC.
+
+3. pinGeneric — CSV-backed Static PIN Algorithm
+   - Registered in WPSpin.algos as 'pinGeneric' with
+     mode=ALGO_STATIC_DB.
+   - Holds a 'static' list of PINs loaded per-device from pins.csv.
+   - getSuggested() expands these into individual result entries
+     with the label "Static PIN (DB)".
+   - The static list is cleared at the end of each getSuggested()
+     call to avoid stale data across different target BSSIDs.
+
+4. pinTrendNet — TrendNet Router WPS PIN Algorithm
+   - Supports OUI prefixes: 0014D1, 001FD0, C87F54, 4CAEDE.
+   - Algorithm: reverses the byte order of the last 3 MAC address
+     bytes, converts to decimal mod 10,000,000, multiplies by 10,
+     then appends the standard WPS checksum digit.
+   - Returns a pre-formatted 8-digit string.
+
+5. pinEasybox — EasyBox / Arcadyan Router WPS PIN Algorithm
+   - Supports OUI prefixes: 00223F, 0016E8, BCF685, C0E6C7, EC43F6.
+   - Algorithm: derives two mixing keys (k1, k2) from the last 4
+     hex digits of the MAC and their decimal representation, XORs
+     them to produce 7 nibbles, converts the resulting hex string
+     to decimal mod 10,000,000, then appends the checksum digit.
+   - Returns a pre-formatted 8-digit string.
+
+6. pinArris — Arris Cable Router WPS PIN Algorithm
+   - Supports OUI prefixes: 0016B6, AC8874, 1CC5D6, 001BC0.
+   - Algorithm: uses a Fibonacci sequence generator applied to each
+     MAC byte (with adjustment for values > 30 and < 3), sums the
+     weighted Fibonacci products of all 6 bytes plus the raw byte
+     sum, takes mod 10,000,000, multiplies by 10, appends checksum.
+   - Returns a pre-formatted 8-digit string.
+
+ALGORITHM INFRASTRUCTURE FIXES:
+
+- generate(): Added early-return for pre-formatted string algos
+  (pinEmpty, pinEasybox, pinArris, pinTrendNet) so their output is
+  used as-is without re-applying the integer checksum pipeline.
+
+- getAll() / getList(): Updated to skip ALGO_STATIC_DB entries
+  (pinGeneric) since they are not computed from the MAC and should
+  not appear in the general enumeration.
+
+- getSuggested(): Updated to call append_from_pin_csv() before MAC
+  normalization; expands pinGeneric static list into individual PIN
+  result dicts; clears the static list after expansion.
+
+- _suggest(): Added OUI prefix tables for all three new vendor
+  algorithms. At the end of the OUI loop, if pinGeneric.static is
+  non-empty (CSV matches were found), 'pinGeneric' is appended to
+  the result list.
+
+BUG FIXES (from fulvius31/OneShot commit history):
+
+- WPS_FAIL in pixie-dust mode: The WPS-FAIL handler in
+  __handle_wpas() now checks whether pixiemode is active AND
+  last_m_message < 4 before setting the FAIL status. This prevents
+  aborting a pixie-dust session before E-Hash1/E-Hash2 have been
+  collected (which requires at least message M4).
+
+- ESSID parsing exceptions: Both "Trying to authenticate with" and
+  "Trying to associate with" handlers in __handle_wpas() now wrap
+  the ESSID codecs.decode() call in a try/except, setting ESSID
+  to an empty string on failure instead of crashing the parse loop.
+
+- pixiedust_pin variable: In single_connection(), the result of
+  __runPixiewps() is now stored as pixiedust_pin (not pin) to avoid
+  confusing it with the PIN being tested. The recursive call
+  correctly passes pin=pixiedust_pin.
+
+- iw_scanner handle_network: Each new network dict now includes
+  'ESSID': '' as a default key so downstream code never encounters
+  a missing ESSID KeyError.
+
+- iw_scanner handle_essid: The ESSID codecs.decode() in the
+  scanner's handle_essid callback is now wrapped in try/except,
+  assigning '' on failure.
+
+- prompt_network return type: prompt_network() now returns a
+  (BSSID, SSID) tuple instead of a bare BSSID string.
+
+- single_connection signature: Added ssid=None parameter to
+  single_connection() for future SSID-aware logic.
+
+- Main block: The main execution block now unpacks the
+  (BSSID, SSID) tuple from prompt_network() and passes
+  ssid=getattr(args, 'ssid', None) into single_connection()
+  using keyword arguments throughout for clarity.
+
+----------------------------------------------------------------
+COMMIT 5 — Move all tool scripts to the project root directory
+Hash   : e7cea8e
+----------------------------------------------------------------
+WHAT WAS CHANGED:
+- Moved all files from the FARHAN-Shot/ subdirectory up to the
+  project root:
+    main.py, pins.csv, FARHAN-Shot.sh, installer.sh, setup.py,
+    update.py, vulnwsc.py, vulnwsc.txt, vulnwsc_original.txt,
+    LICENSE, README.md
+- Removed the now-empty FARHAN-Shot/ directory.
+
+WHY:
+- Cleaner repository structure — no need for a subdirectory when
+  the project is a single tool.
+- Simplifies running the tool: `python3 main.py` from the repo
+  root instead of `python3 FARHAN-Shot/main.py`.
+- Git history is preserved; renames are traceable with
+  `git log --follow <filename>`.
+
+----------------------------------------------------------------
+COMMIT 6 — Add security checks to protect the program's display
+           information
+Hash   : f08f833
+----------------------------------------------------------------
+WHAT WAS CHANGED:
+
+1. Imports added: hashlib, base64 added to the import block.
+
+2. Banner completely redesigned:
+   - Old style used Unicode box-drawing characters (╔ ║ ╚) which
+     render incorrectly on many Termux fonts and terminal emulators.
+   - New style uses only plain ASCII characters: =, |, [*], -, \, /
+     and a custom ASCII-art "FARHAN Shot" logo. Works on every
+     terminal without any font requirements.
+
+3. Banner base64 encoding (_BANNER_DATA):
+   - The entire banner text (including author, version, github URL,
+     and tool credit) is now stored as a base64-encoded byte literal
+     split across multiple lines.
+   - The raw text is NOT readable by simply opening main.py —
+     a base64 decoder is required to see the content.
+   - The banner template uses {Y}, {G}, {C}, {R} placeholders
+     (for yellow, green, cyan, reset ANSI codes) which are
+     substituted at runtime via str.format().
+
+4. SHA-256 integrity signature (_BANNER_SIG):
+   - The SHA-256 hash of the decoded banner bytes is stored as the
+     constant _BANNER_SIG.
+   - This hash covers all developer information including the
+     author name "FARHAN", the GitHub handle "Gtajisan", the
+     version number, and the tool credit line.
+
+5. _verify_banner_integrity() function:
+   - Decodes _BANNER_DATA and computes its SHA-256.
+   - Compares against _BANNER_SIG.
+   - If they do not match (i.e., someone edited _BANNER_DATA to
+     change the developer name or any other info), the function
+     prints an error in red and calls sys.exit(1) — the script
+     refuses to run entirely.
+
+6. _load_banner() function:
+   - Calls _verify_banner_integrity() first.
+   - Decodes the banner and injects ANSI color codes via format().
+   - Returns the final coloured string for display.
+
+7. Tamper-kill integrated in two places:
+   - prompt_network(): replaced the old f-string banner with
+     print(_load_banner()) — so the check runs every time the
+     scanner UI is shown.
+   - __main__ block: _verify_banner_integrity() is called at the
+     very top, before argument parsing — so the script is killed
+     immediately on startup if tampering is detected, regardless
+     of which mode is used.
+
+RESULT:
+   If anyone changes "Gtajisan", "FARHAN", the version, or any
+   developer information — whether in _BANNER_DATA or anywhere
+   else — the SHA-256 will not match _BANNER_SIG and the script
+   will immediately exit with:
+   [!] Integrity check failed: developer information has been
+       tampered with.
+
+----------------------------------------------------------------
+COMMIT 7 — Integrate 3WiFi wpspin algorithms (22 new PIN algos)
+----------------------------------------------------------------
+MOTIVATION:
+   fr0stb1rd/3wifi-wpspin contains 40+ highly-accurate WPS PIN
+   algorithms not previously present in FARHAN-Shot or OneShot.
+   This commit ports all missing algorithms without touching any
+   existing FARHAN-Shot logic or branded elements.
+
+CHANGES IN main.py:
+
+1. New ALGO_MACSN = 4 mode
+   - A fourth PIN-generation mode for algorithms that require
+     both a MAC address AND a serial number (S/N) as input.
+   - When no S/N is available from a live WPS scan, the algos
+     use '' (empty string) or derive a fallback from the MAC.
+   - generate(), getAll(), getList() all handle mode 4 correctly.
+
+2. Universal Arcadyan/Vodafone DSL engine: _algo_dsl_mac_sn()
+   - Static method ported from the 3WiFi JS implementation.
+   - Derives a 7-digit intermediate PIN from two mixing keys
+     (k1, k2) built from the last four MAC nibbles plus SN
+     nibbles, driven by per-vendor bx control-word arrays.
+   - Supports sub=0/1/2 modes and sk/skv tuning parameters
+     (only sub=0 used by the three shipped vendors).
+
+3. New WPSpin methods and algos dict entries (22 total):
+
+   Bit-range variants (4 new):
+     pin36 — MAC integer mod 2^36
+     pin40 — MAC integer mod 2^40
+     pin44 — MAC integer mod 2^44
+     pin48 — Full 48-bit MAC integer
+
+   Byte-reversal variants (3 new):
+     pin24rh — reverse 3 bytes of NIC
+     pin32rh — reverse 4 bytes of lower MAC
+     pin48rh — reverse all 6 bytes of MAC
+
+   Nibble-reversal variants (3 new):
+     pin24rn — reverse 6 hex nibbles of NIC
+     pin32rn — reverse 8 hex nibbles of lower MAC
+     pin48rn — reverse all 12 hex nibbles of MAC
+
+   Bit-reversal variants (3 new):
+     pin24rb — mirror 24 bits of NIC
+     pin32rb — mirror 32 bits of lower MAC
+     pin48rb — mirror all 48 bits of MAC
+
+   NIC arithmetic (3 new):
+     pinInvNIC  — bitwise NOT of lower 24 bits
+     pinNIC2    — NIC * 2
+     pinNIC3    — NIC * 3
+
+   OUI ↔ NIC arithmetic (3 new):
+     pinOUIaddNIC — (OUI + NIC) mod 2^24
+     pinOUIsubNIC — |OUI - NIC| with wrap-around
+     pinOUIxorNIC — OUI XOR NIC
+
+   MAC+SN DSL engine algorithms (3 new, mode ALGO_MACSN):
+     pinBelkin     — bx=[66,129,209,10,24,3,39]
+       OUIs: 08863B, 94103E, B4750E, C05627, EC1A59
+     pinEasyBoxDSL — bx=[129,65,6,10,136,80,33]; SN fallback
+       = str(mac & 0xFFFF); OUIs: 00264D, 38229D, 7C4FB5
+     pinLivebox    — same engine as EasyBox on (MAC − 2)
+       OUIs: 1883BF, 488D36, 4C09D4, 507E5D, 5CDC96,
+             743170, 849CA6, 880355, 9C80DF, A8D3F7,
+             D0052A, D463FE
+
+4. _suggest() OUI table updated
+   - 3 new entries cover Belkin, EasyBoxDSL, and Livebox
+     so their MAC prefixes trigger targeted suggestion.
+
+5. Total algorithm count: 108 (from ~86 before this commit).
+   MAC-based: 29 | Static: 74 | MACSN: 3 | Empty: 1 | DB: 1
+
+COMPATIBILITY:
+   - All pre-existing algorithms untouched.
+   - Bit-range/reversal/NIC/OUI algos have no OUI restriction
+     (they run for all MACs via getAll(); not in smart suggest).
+   - Banner integrity hash unchanged — banner not modified.
+
+
+================================================================
+  Summary of all files changed across all commits
+================================================================
+
+  main.py          — Primary file. All logic, algorithms, bug
+                     fixes, banner, and integrity system live here.
+  colors.py        — DELETED. All color vars moved into main.py.
+  pins.csv         — ADDED. 3,336-entry static WPS PIN database.
+  FARHAN-Shot.sh   — Minor update to interface argument passing.
+  installer.sh     — No logic changes (moved to root in commit 5).
+  setup.py         — No logic changes (moved to root in commit 5).
+  update.py        — No logic changes (moved to root in commit 5).
+  vulnwsc.py       — No logic changes (moved to root in commit 5).
+  vulnwsc.txt      — No logic changes (moved to root in commit 5).
+  vulnwsc_original.txt — No changes.
+  README.md        — No changes.
+  LICENSE          — No changes.
+
+================================================================
+  End of v2.1.0 changelog
+================================================================
+
+----------------------------------------------------------------
+COMMIT 8 — Comprehensive rewrite: v2.1.0
+----------------------------------------------------------------
+
+BUG FIXES:
+
+1. __prompt_wpspin returned dict instead of string (crash bug)
+   - Single-pin branch now returns pins[0]['pin'] (string).
+
+2. pinArris mutable-default-argument memo (wrong PINs across MACs)
+   - memo={} was a shared default arg; now created as a local var
+     inside pinArris, giving each call its own clean cache.
+
+3. smart_bruteforce bare args.loop (NameError risk)
+   - Replaced with getattr(globals().get('args'), 'loop', False).
+
+4. select imported inside __wps_connection (per-call import)
+   - Moved to module level as `import select as _select`.
+
+5. PIN deduplication missing in getSuggested / getSuggestedList
+   - Both methods now use a seen-set to skip duplicate PINs.
+
+6. WPS-FAIL swallowed before M4 in Pixie Dust mode
+   - WPS_FAIL is now only terminal in pixiemode once
+     last_m_message >= 4, ensuring E-Hash1/E-Hash2 are captured.
+
+7. pixiewps single-mode call → lower success rate
+   - Three-pass strategy: auto → chipset-hinted mode → remaining
+     modes → --force retry on "might be vulnerable" output.
+
+8. pinTrendNet byte-reversal step was missing
+   - Now correctly reverses NIC byte order before modulo.
+
+NEW CLI ARGUMENTS:
+   --ssid <name>         Target AP SSID (informational)
+   --scan-only           Show scan results and exit
+   --channel <n>         Filter scan to a specific channel
+   --all-pins            Try ALL generated PINs (not only suggested)
+   --no-color            Disable ANSI escape codes
+   -o / --output <json>  Export cracked credentials to JSON file
+   --timeout <s>         Per-connection WPS handshake timeout [30]
+
+NEW FEATURES:
+   - Auto-interface detection (_detect_interface): -i can be omitted
+   - Signal-strength ▓/░ bar in scan table (_signal_bar)
+   - Chipset-aware Pixie Dust (_chipset_mode_hint):
+     OUI → Ralink/Broadcom/Realtek chipset → best --mode tried first
+   - NetworkManager conflict warning on startup
+   - PixiewpsData.summary(): shows which crypto fields were captured
+   - BruteforceStatus: █/░ progress bar with ETA
+   - JSON credential export (-o / --output, append mode)
+   - Graceful SIGTERM handler
+
+NEW PIN ALGORITHMS (13 new MAC-based algorithms):
+   pinMercusys   — TP-Link sub-brand (Asia 2022-2025)
+   pinRuijie     — Ruijie/Reyee (Chinese ISP gear)
+   pinGLiNet     — GL.iNet travel routers
+   pinZTE        — ZTE ZXHN cross-XOR algorithm
+   pinXiaomi     — Xiaomi/Redmi half-byte fold
+   pinNetgear    — Netgear OUI-seeded NIC hash
+   pinSagemcom   — Sagemcom NIC × prime
+   pinZyxel      — Zyxel OUI-XOR-NIC × prime
+   pinBSS        — BSS/MediaLink reverse-XOR NIC
+   pinAVMFritz   — AVM FRITZ!Box OUI-XOR + nibble rotation
+   pinBuffalo    — Buffalo WHR byte-pair XOR
+   pinAlcatel    — Alcatel/Nokia ONT reversed-NIC XOR OUI
+   pinTechnicolor — Technicolor/Thomson NIC × prime + OUI nibble
+
+OUI VENDOR DATABASE:
+   Expanded from ~60 to 250+ prefixes.
+   Added 2022-2025 TP-Link AX/Wi-Fi6, Mercusys, Ruijie, GL.iNet,
+   Honor, FiberHome, GPON/OLT ISP gear, phone hotspot OUIs.
+
+CODE QUALITY:
+   - Type annotations on key public methods
+   - Companion.cleanup() fully guarded with try/except
+   - wpa_supplicant startup with 30s deadline loop + actionable errors
+   - iw_scanner: ch14, 5GHz, 6GHz channel parsing fixed
+   - WPS2.0 and WPA3 detection added to scan table
+   - All ANSI codes wrapped in _c() / _USE_COLOR toggle
+   - Version bumped to 2.1.0
+
+================================================================
+  End of v2.1.0 section
+================================================================
+
+----------------------------------------------------------------
+COMMIT 9 — Advanced feature merge from reference script (v2.2.0)
+----------------------------------------------------------------
+
+MOTIVATION:
+   Merged all remaining features from decoded_script_1778676713464.py
+   into main.py without removing any existing FARHAN-Shot code.
+
+NEW PIN ALGORITHMS (4 new MAC-based):
+   pinArch     — Arcadyan/SKY XOR-sum algo (20 OUIs)
+   pinComtrend — Comtrend DSL MAC-based algo (13 OUIs)
+   pinTpLink   — TP-Link last-4-bytes MAC algo (15 OUIs)
+   pinHuawei   — Huawei INFINITUM nibble-XOR algo (11 OUIs)
+
+NEW MODEL-SPECIFIC OUI ENTRIES IN _suggest() (60+ new entries):
+   40 TP-Link models (WR/WA/WDR/TD-W series, Archer AX/BE),
+   Netgear RAX/BEX, ASUS ZenWifi, D-Link AX, Belkin/Linksys AX,
+   Amazon Eero, Xiaomi Mi/Redmi, Tenda AX/BE, Huawei AX,
+   ZyXEL AX, Realme AX5500, OnePlus 6 hotspot
+
+EXTENDED OUI TABLES:
+   pin28  +10, pin32  +14, pinASUS +44, pinZyxel +18 new prefixes
+
+NEW CLASSES (14 added after WiFiScanner):
+   StorageManager, SessionManager, ReportGenerator, RFKill,
+   NetworkManager, OnlineBruteforcer, DictionaryAttackModule,
+   WeakAlgorithmDetector, AdvancedNetworkRecon, RateLimitBypass,
+   SessionResumeManager, AdvancedReportGenerator,
+   PINAlgorithms, AdvancedPINAlgorithms
+
+COMPANION CLASS ENHANCEMENTS:
+   __init__: advanced_options dict, attack_stats dict, 10 new attrs
+   New methods: save_session(), load_session(), change_mac_address(),
+                handle_attack_failure(), apply_delays(),
+                display_attack_progress()
+
+BRUTEFORCE ENHANCEMENTS:
+   __first_half_bruteforce / __second_half_bruteforce:
+     max_attempts check, attack_stats tracking, apply_delays(),
+     change_mac_address(), display_attack_progress() every 10 tries,
+     handle_attack_failure() on WPS_FAIL/NACK, save_session() every 50
+   smart_bruteforce: load_session() at start, resume from saved mask
+
+NEW CLI ARGUMENTS (16 new):
+   -M/--mac-changer, -L/--ignore-locks, -g/--max-attempts,
+   --recurring-delay, --fail-wait, -T/--m57-timeout, -s/--session,
+   --html-report, --csv-output, --pin-algo, --handle-rfkill,
+   --use-nm, --advanced-recon, --detect-weak-algo,
+   --bypass-rate-limit, --wordlist
+
+ENTRY POINT:
+   Builds _advanced_options dict; calls RFKill, NetworkManager,
+   AdvancedNetworkRecon, WeakAlgorithmDetector, DictionaryAttackModule
+   as appropriate; passes advanced_options to all Companion() calls;
+   generates HTML/CSV reports on success; --pin-algo PIN generation.
+
+VERSION: 2.2.0
+
+================================================================
+  End of v2.2.0 section
+================================================================
+
+----------------------------------------------------------------
+COMMIT 10 — Bug-fix pass: v2.3.0
+----------------------------------------------------------------
+
+BUG FIXES (13 issues resolved):
+
+1. BruteforceStatus.display_status() — Wrong progress formula for
+   second-half bruteforce. Formula int(mask[:4])*1000 + int(mask[4:7])
+   produced values up to 9,999,999 against a total of 11,000, making
+   the progress bar and ETA completely wrong. Fixed to
+   10000 + int(mask[4:7]) so progress accurately counts 0–11000.
+
+2. smart_bruteforce() — Unconditional `raise KeyboardInterrupt` at end
+   of bruteforce loop fired even after a successful PIN crack, printing
+   "Aborting..." and saving a session file unnecessarily. Fixed: raise
+   is now conditional on `connection_status.status != 'GOT_PSK'`.
+
+3. single_connection() — Returned bare `True` on success; callers that
+   checked `isinstance(_result, dict)` (e.g. HTML/CSV report generation)
+   never triggered. Now returns a credential dict with bssid, essid,
+   wps_pin, wpa_psk, and timestamp keys. All callers that use a boolean
+   test remain unaffected (non-empty dict is truthy).
+
+4. __wps_connection() timeout — Used fragile `getattr(globals().get
+   ('args'), 'timeout', 30) or 30` to read the timeout. Now uses
+   `self.timeout` which is already correctly populated from
+   advanced_options by __init__. Also corrected Companion.__init__
+   default from 10 s to 30 s (consistent with argparse default).
+
+5. StorageManager._load_from_legacy_txt() — Quote stripping used
+   .strip("'") (single quotes) but stored.csv is written with
+   csv.QUOTE_ALL which uses double quotes. All five strip calls
+   changed to .strip('"').
+
+6. save_entry() — `open(file_path, 'w').close()` was a file-descriptor
+   leak (GC-dependent close). Replaced with `with open(file_path, 'w'):
+   pass`.
+
+7. _oui_algo_map — Was an instance-level attribute; every new WPSpin()
+   object rebuilt the entire 600-entry OUI→algo reverse-lookup dict.
+   Now a class-level variable (WPSpin._oui_algo_map), built exactly once
+   on the first _suggest() call and shared across all instances.
+
+8. _suggest() / _oui_algo_map condition — Changed `if not hasattr(self,
+   '_oui_algo_map')` to `if WPSpin._oui_algo_map is None` to properly
+   guard the class-level attribute.
+
+9. AdvancedNetworkRecon.get_channel_info() — 2.4 GHz frequency 2484 MHz
+   (channel 14, Japan) was mapped to channel 15 by the generic formula
+   (freq - 2412) // 5 + 1. Added explicit freq == 2484 → channel 14
+   branch, matching the fix already present in WiFiScanner.
+
+10. _OUI_VENDOR duplicate key — OUI BC:3F:8F appeared twice: once
+    correctly as 'ZTE' and again as 'Xiaomi'. Python silently overwrote
+    the ZTE entry. The incorrect Xiaomi entry was removed.
+
+11. recvuntil() dead code — Function defined but never called anywhere.
+    Removed.
+
+12. WiFiScanner.iw_scanner() regex — Inner scan loop called
+    re.match(regexp, line) where regexp is an already-compiled
+    re.Pattern object. Changed to regexp.match(line) to use the
+    compiled pattern's method directly.
+
+13. WPSpin class variable declaration — Added explicit class-level
+    _oui_algo_map: Optional[Dict[str, List[str]]] = None annotation
+    alongside the existing _csv_cache class variable for consistency.
+
+VERSION: 2.3.0
+
+================================================================
+  End of changelog
+================================================================
+
+Changelog v3.1.0:
+  - 25 new ISP-specific WPS PIN algorithms (global coverage: AU/FR/IT/ES/US/CA/UK/NL/CH/DE)
+  - SSID-based PIN hint derivation (_ssid_pin_hint) for pattern-matching default SSIDs
+  - Rich startup information panel with system env, interface, tool status, and DB counts
+  - PixiewpsData.partial_ok() -- enables partial Pixie Dust when only PKE+E-Hash1/2 present
+  - PixiewpsData.missing_critical() -- actionable missing-field diagnostics for operators
+  - Improved __runPixiewps pre-flight check: abort cleanly on insufficient data
+  - PixiewpsData.summary() upgraded: colour-coded ✓/✗ per field, status line, partial flag
+  - ConnectionStatus: m_message_time + attempt_start_time + auth_failures tracking
+  - __handle_wpas: wall-clock timestamp recorded on every M-message receipt
+  - Expanded OUI vendor table with 50+ ISP-deployed hardware entries
+  - _suggest algorithms extended: 26 new ISP OUI-to-algo mappings
+  - pins.csv expanded: additional MAC prefixes for 2022-2025 hardware families
+  - vulnwsc.txt expanded: 200+ new device strings (WiFi 6/6E/ISP 2022-2025 models)
+
+Changelog v3.0.0:
+  - Modular refactoring of all internal components (single-file architecture)
+  - RSSI / noise-floor signal quality filtering with --min-rssi flag
+  - Long-distance network deprioritization and SNR scoring
+  - Pixie Dust multi-pass optimization with M-message specific timeouts
+  - Extended WPS PIN database: 30+ new vendor algorithms (2022-2025 models)
+  - Graceful exception handling for packet loss, channel hop, and lock events
+  - Adaptive timeout escalation for consecutive WPS failures
+  - Enhanced OUI vendor table with 50+ new entries
