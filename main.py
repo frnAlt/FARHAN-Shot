@@ -22,6 +22,7 @@ import atexit
 import re
 import codecs
 import socket
+import uuid
 import pathlib
 import time
 import signal as _signal
@@ -1021,6 +1022,8 @@ def _distro_name() -> str:
             if 'manjaro' in name: return 'Manjaro'
     except Exception:
         pass
+    if 'TERMUX_VERSION' in os.environ or os.path.exists('/data/data/com.termux'):
+        return 'Termux'
     return 'Linux'
 
 
@@ -1036,27 +1039,32 @@ def _install_hint(tool: str) -> str:
             'Kali': 'apt install wpasupplicant', 'Debian': 'apt install wpasupplicant',
             'Ubuntu': 'apt install wpasupplicant', 'Arch': 'pacman -S wpa_supplicant',
             'Fedora': 'dnf install wpa_supplicant', 'Manjaro': 'pacman -S wpa_supplicant',
+            'Termux': 'pkg install wpa-supplicant',
         },
         'pixiewps': {
             'Kali': 'apt install pixiewps', 'Debian': 'apt install pixiewps',
             'Ubuntu': 'apt install pixiewps || snap install pixiewps',
             'Arch': 'yay -S pixiewps', 'Fedora': 'dnf install pixiewps',
             'Manjaro': 'pamac install pixiewps',
+            'Termux': 'pkg install pixiewps || (git clone https://github.com/wiire-a/pixiewps && cd pixiewps/make && make install)',
         },
         'iw': {
             'Kali': 'apt install iw', 'Debian': 'apt install iw',
             'Ubuntu': 'apt install iw', 'Arch': 'pacman -S iw',
             'Fedora': 'dnf install iw', 'Manjaro': 'pacman -S iw',
+            'Termux': 'pkg install iw',
         },
         'rfkill': {
             'Kali': 'apt install rfkill', 'Debian': 'apt install rfkill',
             'Ubuntu': 'apt install rfkill', 'Arch': 'pacman -S util-linux',
             'Fedora': 'dnf install rfkill', 'Manjaro': 'pacman -S util-linux',
+            'Termux': 'pkg install util-linux',
         },
         'aircrack-ng': {
             'Kali': 'apt install aircrack-ng', 'Debian': 'apt install aircrack-ng',
             'Ubuntu': 'apt install aircrack-ng', 'Arch': 'pacman -S aircrack-ng',
             'Fedora': 'dnf install aircrack-ng', 'Manjaro': 'pamac install aircrack-ng',
+            'Termux': 'pkg install aircrack-ng',
         },
         'macchanger': {
             'Kali': 'apt install macchanger', 'Debian': 'apt install macchanger',
@@ -1454,15 +1462,21 @@ def _auto_smart_attack(companion, bssid: str, ssid: str = '', args=None) -> bool
     _freq = getattr(args, '_freq_mhz', 0) or 0
 
     # -- Stage 1: Pixie Dust -----------------------------------------------
-    _stage(1, 'Pixie Dust attack…')
-    logger.debug('Stage 1 -- Pixie Dust attack starting: bssid=%s ssid=%s', bssid, ssid)
-    result = companion.single_connection(
-        bssid=bssid, ssid=ssid, pixiemode=True,
-        showpixiecmd=pxcmd, pixieforce=pxforce, output_file=out_file,
-        freq_mhz=_freq)
-    if result and isinstance(result, dict):
-        logger.debug('Stage 1 -- Pixie Dust succeeded: bssid=%s', bssid)
-        return True
+    if _check_pixiewps() is not None:
+        _stage(1, 'Pixie Dust attack…')
+        logger.debug('Stage 1 -- Pixie Dust attack starting: bssid=%s ssid=%s', bssid, ssid)
+        result = companion.single_connection(
+            bssid=bssid, ssid=ssid, pixiemode=True,
+            showpixiecmd=pxcmd, pixieforce=pxforce, output_file=out_file,
+            freq_mhz=_freq)
+        if result and isinstance(result, dict):
+            logger.debug('Stage 1 -- Pixie Dust succeeded: bssid=%s', bssid)
+            return True
+    else:
+        _stage(1, 'Pixie Dust attack (skipped -- pixiewps not installed)…')
+        hint = _install_hint('pixiewps')
+        print(f'{warn} pixiewps not found. Skipping Pixie Dust stage.\n'
+              f'{info} To enable Pixie Dust in future runs, install with: {hint}')
 
     # -- Stage 2: SSID-hint PINs ------------------------------------------
     ssid_hints = _ssid_pin_hint(ssid) if ssid else []
@@ -4524,10 +4538,7 @@ class Companion:
         self.wpas_ctrl_path = f"{self.tempdir}/{interface}"
         self.__init_wpa_supplicant()
 
-        self.res_socket_file = f"{tempfile._get_default_tempdir()}/{next(tempfile._get_candidate_names())}"
-        self.retsock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-        self.retsock.bind(self.res_socket_file)
-        self.retsock.settimeout(10)
+        self._init_client_socket()
 
         self.pixie_creds      = PixiewpsData()
         self.connection_status = ConnectionStatus()
@@ -4547,6 +4558,31 @@ class Companion:
 
         atexit.register(self.cleanup)
 
+    def _init_client_socket(self):
+        """Initialize or re-initialize the client AF_UNIX datagram socket."""
+        if hasattr(self, 'retsock') and self.retsock:
+            try:
+                self.retsock.close()
+            except Exception:
+                pass
+        res_sock_file = getattr(self, 'res_socket_file', None)
+        if res_sock_file and os.path.exists(res_sock_file):
+            try:
+                os.remove(res_sock_file)
+            except Exception:
+                pass
+
+        self.res_socket_file = os.path.join(tempfile.gettempdir(), f'wpas_res_{os.getpid()}_{uuid.uuid4().hex[:8]}')
+        if os.path.exists(self.res_socket_file):
+            try:
+                os.remove(self.res_socket_file)
+            except Exception:
+                pass
+
+        self.retsock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        self.retsock.bind(self.res_socket_file)
+        self.retsock.settimeout(10)
+
     def __init_wpa_supplicant(self):
         # Check wpa_supplicant is available
         if not shutil.which('wpa_supplicant'):
@@ -4557,6 +4593,12 @@ class Companion:
                 '  pacman -S wpa_supplicant    (Arch/Manjaro)\n'
                 '  dnf install wpa_supplicant  (Fedora/RHEL)\n'
                 '  pkg install wpa-supplicant  (Termux)')
+
+        if hasattr(self, 'tempdir') and os.path.exists(self.tempdir):
+            try:
+                os.chmod(self.tempdir, 0o755)
+            except Exception:
+                pass
 
         # Kill any stale wpa_supplicant that might hold our control socket path
         subprocess.run(
@@ -4570,8 +4612,8 @@ class Companion:
                 pass
 
         print(f'{info} Running wpa_supplicant…')
-        cmd = 'wpa_supplicant -K -d -Dnl80211,wext,hostapd,wired -i{} -c{}'.format(
-            self.interface, self.tempconf)
+        _v_flag = '-dd' if self.print_debug else '-d'
+        cmd = f'wpa_supplicant -K {_v_flag} -Dnl80211,wext,hostapd,wired -i{self.interface} -c{self.tempconf}'
         self.wpas = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE,
                                      stderr=subprocess.STDOUT,
                                      encoding='utf-8', errors='replace')
@@ -4588,20 +4630,36 @@ class Companion:
                     'wpa_supplicant failed to create control socket within 30 s.\n'
                     'Check that the interface name is correct and that no other '
                     'wpa_supplicant instance is running.\n'
-                    'Kill stale instance with: pkill wpa_supplicant')
+                    'Kill stale instance with: sudo pkill -9 wpa_supplicant\n'
+                    'Or stop conflicting services: sudo systemctl stop NetworkManager iwd')
             time.sleep(.1)
 
     def sendOnly(self, command):
-        self.retsock.sendto(command.encode(), self.wpas_ctrl_path)
+        if not hasattr(self, 'retsock') or self.retsock is None:
+            self._init_client_socket()
+        try:
+            self.retsock.sendto(command.encode(), self.wpas_ctrl_path)
+        except (socket.error, OSError, Exception):
+            try:
+                self._init_client_socket()
+                self.retsock.sendto(command.encode(), self.wpas_ctrl_path)
+            except Exception:
+                pass
 
     def sendAndReceive(self, command):
+        if not hasattr(self, 'retsock') or self.retsock is None:
+            self._init_client_socket()
         for _attempt in range(3):
             try:
                 self.retsock.sendto(command.encode(), self.wpas_ctrl_path)
                 (b, address) = self.retsock.recvfrom(4096)
                 return b.decode('utf-8', errors='replace')
-            except socket.timeout:
+            except (socket.timeout, socket.error, OSError, Exception):
                 if _attempt < 2:
+                    try:
+                        self._init_client_socket()
+                    except Exception:
+                        pass
                     time.sleep(0.3)
         return ''
 
@@ -4649,6 +4707,7 @@ class Companion:
             # Brief pause so the driver releases netlink resources
             time.sleep(0.6)
             self.__init_wpa_supplicant()
+            self._init_client_socket()
             print(f'{ok} wpa_supplicant restarted successfully')
             return True
         except Exception as _e:
@@ -4717,9 +4776,11 @@ class Companion:
                     self.connection_status.status = 'WSC_NACK'
                 if pixiemode:
                     print(f'{info} Received WSC NACK (Pixie Dust: crypto data captured — this is normal)')
+                elif pbc_mode:
+                    print(f'{info} Received WSC NACK (Push Button session ended/rejected)')
                 else:
                     print(f'{info} Received WSC NACK')
-                    print(f'{err} Error: wrong PIN code')
+                    print(f'{err} Error: Wrong PIN Code')
             elif 'Received M2D' in line:
                 self.connection_status.status = 'WPS_FAIL'
             elif ('Enrollee Nonce' in line or 'ENonce' in line or
@@ -5334,7 +5395,9 @@ class Companion:
 
         if pixiemode and not pbc_mode:
             if _check_pixiewps() is None:
+                hint = _install_hint('pixiewps')
                 print(f'{err} pixiewps not found!')
+                print(f'{info} Install pixiewps to run Pixie Dust attacks:\n  {hint}')
                 return False
 
         if pbc_mode:
@@ -6018,7 +6081,20 @@ class WiFiScanner:
                         'WPA3' if sec in ('Unknown', 'Open') else 'WPA2/WPA3')
                 networks[-1]['WPA3'] = True
 
-        cmd  = 'iw dev {} scan'.format(self.interface)
+        if self.channel_filter:
+            # Map 2.4GHz (1-14) and 5GHz/6GHz channel numbers to frequency in MHz
+            ch = self.channel_filter
+            if ch == 14:
+                _scan_freq = 2484
+            elif 1 <= ch <= 13:
+                _scan_freq = 2407 + (ch * 5)
+            elif 36 <= ch <= 177:
+                _scan_freq = 5000 + (ch * 5)
+            else:
+                _scan_freq = 0
+            cmd = f'iw dev {self.interface} scan freq {_scan_freq}' if _scan_freq else f'iw dev {self.interface} scan'
+        else:
+            cmd = f'iw dev {self.interface} scan'
         lines = []
         _max_scan_retries = self.scan_retries
         for _scan_attempt in range(1, _max_scan_retries + 1):
@@ -6027,9 +6103,14 @@ class WiFiScanner:
                                       stderr=subprocess.STDOUT, encoding='utf-8', errors='replace',
                                       timeout=35)
                 _out = proc.stdout or ''
-                if 'command failed' in _out and _scan_attempt < _max_scan_retries:
-                    time.sleep(1.5 * _scan_attempt)
-                    continue
+                if 'command failed' in _out:
+                    # Auto-remedy common interface down or RF-kill block errors
+                    if any(err_msg in _out for err_msg in ('Network is down', '-100', 'Device or resource busy', '-16', 'RF-kill', '-132')):
+                        subprocess.run(f'ip link set {self.interface} up 2>/dev/null', shell=True)
+                        subprocess.run('rfkill unblock wifi 2>/dev/null', shell=True)
+                    if _scan_attempt < _max_scan_retries:
+                        time.sleep(1.2 * _scan_attempt)
+                        continue
                 lines = _out.splitlines()
                 break
             except subprocess.TimeoutExpired:
@@ -6063,7 +6144,13 @@ class WiFiScanner:
 
         for line in lines:
             if line.startswith('command failed:'):
-                print(f'{err} Error: {line}')
+                print(f'{err} Scan error on {self.interface}: {line}')
+                if 'Network is down' in line:
+                    print(f'{info} Fix: Bring interface up with: sudo ip link set {self.interface} up')
+                elif 'RF-kill' in line:
+                    print(f'{info} Fix: Unblock WiFi RF-Kill with: sudo rfkill unblock wifi')
+                elif 'Device or resource busy' in line:
+                    print(f'{info} Fix: Kill process conflicts with: sudo python3 main.py -i {self.interface} -K -k')
                 return {}
             line = line.strip('\t')
             for regexp, handler in matchers.items():
@@ -6071,6 +6158,8 @@ class WiFiScanner:
                 if res:
                     handler(line, res, networks)
                     break
+
+        _total_raw_networks = len(networks)
 
         # Filter: WPS only
         networks = [x for x in networks if bool(x['WPS'])]
@@ -6098,6 +6187,8 @@ class WiFiScanner:
                       f'(too weak/far -- use --min-rssi to adjust)')
 
         if not networks:
+            if _total_raw_networks > 0:
+                print(f'{warn} Found {_total_raw_networks} Wi-Fi network(s) in range, but none have WPS enabled.')
             return {}
 
         # Ordering strategy:
@@ -6121,7 +6212,12 @@ class WiFiScanner:
 
         networks = self.iw_scanner()
         if not networks:
-            print(f'{err} No WPS networks found.')
+            print(f'{err} No WPS networks found on {self.interface}.')
+            print(f'{info} Troubleshooting checklist:\n'
+                  f'  1. Ensure interface is UP:  sudo ip link set {self.interface} up\n'
+                  f'  2. Unblock RF-Kill switches: sudo rfkill unblock wifi\n'
+                  f'  3. Kill conflicting daemons: sudo python3 main.py -i {self.interface} -K -k\n'
+                  f'  4. Test raw scan manually:  sudo iw dev {self.interface} scan')
             return
 
         self._print_network_table(networks)
@@ -6246,7 +6342,12 @@ class WiFiScanner:
         """Scan and print results without prompting for a target."""
         networks = self.iw_scanner()
         if not networks:
-            print(f'{err} No WPS networks found.')
+            print(f'{err} No WPS networks found on {self.interface}.')
+            print(f'{info} Troubleshooting checklist:\n'
+                  f'  1. Ensure interface is UP:  sudo ip link set {self.interface} up\n'
+                  f'  2. Unblock RF-Kill switches: sudo rfkill unblock wifi\n'
+                  f'  3. Kill conflicting daemons: sudo python3 main.py -i {self.interface} -K -k\n'
+                  f'  4. Test raw scan manually:  sudo iw dev {self.interface} scan')
             return
         self._print_network_table(networks)
 

@@ -40,35 +40,60 @@ Python 3.6+   wpa_supplicant   pixiewps   iw   Root/sudo
 
 ---
 
-## Installation
+## Installation & Setup
 
-**Linux / Kali**
+### 🐧 Linux / Kali Linux
 ```bash
-sudo apt install -y wpasupplicant pixiewps iw python3
-git clone --depth 1 https://github.com/frnAlt/FARHAN-Shot.git
-cd FARHAN-Shot
-sudo python3 main.py --help
-```
+# 1. Install system dependencies
+sudo apt update && sudo apt install -y wpasupplicant pixiewps iw python3 git
 
-**Android / Termux — One-liner**
-```bash
-curl -sSf https://raw.githubusercontent.com/frnAlt/FARHAN-Shot_Termux_installer/master/installer.sh | bash
-```
-
-**Android / Termux — Manual**
-```bash
-pkg update && pkg upgrade -y
-pkg install root-repo git tsu python wpa-supplicant pixiewps iw openssl -y
-termux-setup-storage
+# 2. Clone repository & run
 git clone --depth 1 https://github.com/frnAlt/FARHAN-Shot.git
 cd FARHAN-Shot
 sudo python3 main.py -i wlan0 -K
 ```
 
-**Update / Uninstall**
+---
+
+### 📱 Android / Termux (Rooted)
+
+> **Note:** Root access (`sudo` via Magisk / KernelSU / APatch) is required for Termux Wi-Fi hardware control.
+
+**Option A: One-Liner Installer**
 ```bash
-cd FARHAN-Shot && git pull          # update
-sudo rm -rf FARHAN-Shot             # uninstall
+curl -sSf https://raw.githubusercontent.com/frnAlt/FARHAN-Shot/master/installer.sh | bash
+```
+
+**Option B: Manual Setup**
+```bash
+# 1. Update packages & install dependencies (use 'sudo' instead of obsolete 'tsu')
+pkg update && pkg upgrade -y
+pkg install root-repo git sudo python wpa-supplicant pixiewps iw openssl -y
+
+# 2. Grant storage permissions
+termux-setup-storage
+
+# 3. Clone & run
+git clone --depth 1 https://github.com/frnAlt/FARHAN-Shot.git
+cd FARHAN-Shot
+sudo python3 main.py -i wlan0 -K
+```
+
+> **📱 Android Termux Quick Checklist:**
+> 1. Turn Wi-Fi OFF in Android settings (prevents Android OS from controlling the Wi-Fi card).
+> 2. Enable Android Location (GPS) services (required by Android kernel to expose Wi-Fi scan results).
+> 3. Turn ON Mobile Hotspot (forces kernel to keep `wlan0` interface powered and active).
+> 4. Run `sudo python3 main.py -i wlan0 -K` in Termux.
+
+---
+
+### 🔄 Auto-Update / Uninstall
+```bash
+# Update to latest version
+cd FARHAN-Shot && git pull
+
+# Uninstall
+sudo rm -rf FARHAN-Shot
 ```
 
 ---

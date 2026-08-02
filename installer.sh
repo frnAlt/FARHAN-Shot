@@ -52,7 +52,7 @@ run_step() {
 run_step "Updating Termux package lists" "pkg update -y && pkg upgrade -y"
 run_step "Installing root-repo" "pkg install -y root-repo"
 run_step "Installing required packages" \
-"pkg install -y git tsu python wpa-supplicant pixiewps iw openssl"
+"pkg install -y git sudo python wpa-supplicant pixiewps iw openssl"
 run_step "Requesting Termux storage permissions" "termux-setup-storage"
 run_step "Cloning FARHAN-Shot repository" \
 "git clone https://github.com/frnAlt/FARHAN-Shot"
