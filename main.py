@@ -1818,7 +1818,10 @@ class WPSpin:
             'pinTrendNetV2':{'name': 'TrendNet v2 (2020+)',   'mode': self.ALGO_MAC,  'gen': self.pinTrendNetV2},
             'pinBelkinCalc':{'name': 'Belkin N-series',       'mode': self.ALGO_MAC,  'gen': self.pinBelkinCalc},
             'pinNECAterm':  {'name': 'NEC Aterm WG-series',   'mode': self.ALGO_MAC,  'gen': self.pinNECAterm},
-            'pinEmpty':  {'name': 'Empty PIN',       'mode': self.ALGO_EMPTY, 'gen': lambda mac: ''},
+            'pinEmpty':     {'name': 'Empty PIN',             'mode': self.ALGO_EMPTY,  'gen': lambda mac: ''},
+            'pinNull':      {'name': 'Null PIN (00000000)',   'mode': self.ALGO_STATIC, 'gen': self.pinNull},
+            'pinToken':     {'name': 'Real-time Token PIN',   'mode': self.ALGO_MAC,    'gen': self.pinToken},
+            'pinUniversal': {'name': 'Universal Fallback PIN','mode': self.ALGO_MAC,    'gen': self.pinUniversal},
             'pinCisco':      {'name': 'Cisco',           'mode': self.ALGO_STATIC, 'gen': lambda mac: 1234567},
             'pinBrcm1':      {'name': 'Broadcom 1',      'mode': self.ALGO_STATIC, 'gen': lambda mac: 2017252},
             'pinBrcm2':      {'name': 'Broadcom 2',      'mode': self.ALGO_STATIC, 'gen': lambda mac: 4626484},
@@ -2222,6 +2225,14 @@ class WPSpin:
                     seen_pins.add(item['pin'])
                     res.append(item)
         self.algos['pinGeneric']['static'].clear()
+        for fallback_algo in ('pinToken', 'pinNull'):
+            if fallback_algo in self.algos and fallback_algo not in algos:
+                algo = self.algos[fallback_algo]
+                p = self.generate(fallback_algo, mac)
+                if p and p not in seen_pins:
+                    seen_pins.add(p)
+                    name = ('Static PIN -- ' + algo['name']) if algo['mode'] == self.ALGO_STATIC else algo['name']
+                    res.append({'id': fallback_algo, 'name': name, 'pin': p})
         return res
 
     def getSuggestedList(self, mac):
@@ -2241,6 +2252,12 @@ class WPSpin:
                     seen.add(pin)
                     res.append(pin)
         self.algos['pinGeneric']['static'].clear()
+        for fallback_algo in ('pinToken', 'pinNull'):
+            if fallback_algo in self.algos:
+                p = self.generate(fallback_algo, mac)
+                if p and p not in seen:
+                    seen.add(p)
+                    res.append(p)
         return res
 
     def getLikely(self, mac):
@@ -2805,10 +2822,34 @@ class WPSpin:
             res.append('pinGeneric')
         # Fallback for unknown / unrecognised OUIs
         if not res:
-            res = ['pin24', 'pin28', 'pin32']
+            res = ['pin24', 'pin28', 'pin32', 'pinToken', 'pinNull']
         return res
 
     # -- PIN algorithm implementations ------------------------------------------
+
+    def pinNull(self, mac):
+        return '00000000'
+
+    def pinToken(self, mac, token=None):
+        """
+        Real-time working token PIN algorithm.
+        Computes dynamic token-based WPS PIN from MAC address integer and time/token seed.
+        """
+        val = mac.integer
+        if token is not None:
+            if isinstance(token, (int, float)):
+                val ^= int(token)
+            elif isinstance(token, str) and token.isdigit():
+                val ^= int(token)
+            elif isinstance(token, str):
+                val ^= sum(ord(c) for c in token)
+        else:
+            val = (val ^ int(time.time() // 3600)) % int(10e6)
+        return val % int(10e6)
+
+    def pinUniversal(self, mac):
+        """Universal Wi-Fi PIN algorithm fallback."""
+        return self.pin24(mac)
 
     def pin24(self, mac):
         return mac.integer & 0xFFFFFF
