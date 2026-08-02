@@ -7465,8 +7465,25 @@ class AdvancedPINAlgorithms:
 # -- Interface helpers ---------------------------------------------------------
 def ifaceUp(iface, down=False):
     action = 'down' if down else 'up'
-    cmd = 'ip link set {} {}'.format(iface, action)
-    res = subprocess.run(cmd, shell=True, stdout=sys.stdout, stderr=sys.stdout)
+    # Primary: ip link
+    cmd = f'ip link set {iface} {action}'
+    res = subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if res.returncode == 0:
+        if not down:
+            subprocess.run('rfkill unblock wifi 2>/dev/null', shell=True)
+        return True
+
+    # Fallback 1: iw dev <iface> set type managed
+    if not down:
+        subprocess.run('rfkill unblock wifi 2>/dev/null', shell=True)
+        subprocess.run(f'iw dev {iface} set type managed 2>/dev/null', shell=True)
+        res = subprocess.run(f'ip link set {iface} up 2>/dev/null', shell=True)
+        if res.returncode == 0:
+            return True
+
+    # Fallback 2: ifconfig
+    ifconfig_action = 'down' if down else 'up'
+    res = subprocess.run(f'ifconfig {iface} {ifconfig_action} 2>/dev/null', shell=True)
     return res.returncode == 0
 
 
@@ -8001,7 +8018,13 @@ if __name__ == '__main__':
         wmtWifi_device.write_text("1")
 
     if not ifaceUp(args.interface):
-        die('Unable to up interface "{}"'.format(args.interface))
+        print(f'{err} Unable to bring interface "{args.interface}" up.')
+        print(f'{info} Kernel / Driver Troubleshooting:\n'
+              f'  1. Check RF-Kill hardware/software block:  sudo rfkill unblock wifi\n'
+              f'  2. Reset interface mode to managed:       sudo iw dev {args.interface} set type managed\n'
+              f'  3. Stop conflicting NetworkManager/iwd:   sudo systemctl stop NetworkManager iwd\n'
+              f'  4. MediaTek SoC devices (Android/Termux):  add --mtk-wifi flag')
+        die('Interface activation failed.')
 
     # -- Health-check mode (--health exits immediately after diagnostics) ----------
     if getattr(args, 'health', False):
