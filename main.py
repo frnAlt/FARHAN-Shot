@@ -5464,8 +5464,11 @@ class Companion:
                     print(f'{warn} Handshake only reached M{last_m}. '
                           f'E-Hash1/E-Hash2 are sent by the AP in M4 — '
                           f'the exchange must progress to at least M4 for Pixie Dust to work.')
-                    print(f'{info} Possible causes: AP rate-limiting WPS, weak signal, or '
-                          f'AP already locked. Try moving closer or waiting before retrying.')
+                    print(f'{info} Actionable Solutions:\n'
+                          f'  1. MAC Spoofing (-M): AP may be rate-limiting your MAC. Add -M to rotate MAC address.\n'
+                          f'  2. Increase Timeout (--timeout 60): Slow APs take >30s to compute DH keys. Add --timeout 60.\n'
+                          f'  3. Lock Channel (--channel <n>): Prevents channel hopping packet loss during M1-M4.\n'
+                          f'  4. Improve Signal: Move closer to the AP to prevent dropped EAPOL frames.')
                 else:
                     print(f'{info} Handshake reached M{last_m}. Run with -v to see raw '
                           f'wpa_supplicant output and verify the missing fields were transmitted.')
