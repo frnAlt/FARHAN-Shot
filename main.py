@@ -5249,9 +5249,10 @@ class Companion:
             if pin:
                 return pin
             # Still no PIN — give the user the exact command to retry manually with fresh data
-            print(f'{warn} Pixiewps could not crack the PIN even with --force.')
-            print(f'{info} The AP\'s nonces may have changed. Re-run -K to collect fresh'
-                  f' handshake data, then try again.')
+            print(f'{warn} Operational Result: [-] WPS pin not found!')
+            print(f'{info} Note: This is an operational attack outcome (not a software bug):')
+            print(f'       - Not Vulnerable AP: Target router uses a secure PRNG (immune to offline Pixie Dust).')
+            print(f'       - Nonce Expiration / Timeout: WPS session timed out or nonces expired.')
             print(f'{info} Manual retry command (paste after fresh data collection):')
             print(f'    {force_cmd}')
 
@@ -5632,9 +5633,12 @@ class Companion:
                     return self.single_connection(bssid, pin=pixiedust_pin, pixiemode=False,
                                                   store_pin_on_fail=True,
                                                   output_file=output_file, freq_mhz=freq_mhz)
-                logger.warning('Pixie Dust attack failed: Pixiewps returned no PIN for BSSID %s', bssid)
-                print(f'{warn} Pixie Dust failed — Pixiewps returned no PIN (AP may not be vulnerable, or nonce data has expired).')
-                print(f'{info} Falling back to Universal PIN generator and NULL PIN (00000000)…')
+                logger.warning('Pixie Dust attack operational result: Pixiewps returned no PIN for BSSID %s', bssid)
+                print(f'{warn} Operational Result: [-] WPS pin not found! / Pixie Dust failed.')
+                print(f'{info} Note: This is an operational attack outcome (not a software bug):')
+                print(f'       1. Not Vulnerable AP: Target router uses a secure PRNG (immune to offline attack).')
+                print(f'       2. Nonce Expiration / Timeout: Session timed out during exchange, or packet loss occurred.')
+                print(f'{info} Automatically falling back to Universal PIN generator and NULL PIN (00000000)…')
                 fallback_pins = self.generator.getSuggestedList(bssid) if bssid else []
                 if '00000000' not in fallback_pins:
                     fallback_pins.append('00000000')
