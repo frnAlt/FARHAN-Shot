@@ -1947,19 +1947,47 @@ class WPSpin:
             pin = algo_entry['gen'](mac, '')
         else:
             pin = algo_entry['gen'](mac)
-        # Pre-formatted strings (already include checksum digit).
+
+        if pin is None:
+            return ''
+
+        # Pre-formatted strings or integer PINs (already include checksum digit or need one).
         # Verify the checksum digit is correct; silently fix it if not so that
         # downstream code always sends a valid WPS 8-digit PIN.
         if isinstance(pin, str):
-            if len(pin) == 8 and pin.isdigit():
-                body = int(pin[:7])
+            pstr = pin.strip()
+            if not pstr:
+                return ''
+            if len(pstr) == 8 and pstr.isdigit():
+                body = int(pstr[:7])
                 expected = self.checksum(body)
-                if int(pin[7]) != expected:
-                    pin = pin[:7] + str(expected)
-            return pin
-        pin = pin % 10000000
-        pin = str(pin) + str(self.checksum(pin))
-        return pin.zfill(8)
+                if int(pstr[7]) != expected:
+                    return pstr[:7] + str(expected)
+                return pstr
+            elif len(pstr) == 7 and pstr.isdigit():
+                body = int(pstr)
+                return pstr + str(self.checksum(body))
+            elif pstr.isdigit():
+                val = int(pstr) % 10000000
+                bstr = str(val).zfill(7)
+                return bstr + str(self.checksum(int(bstr)))
+            return pstr
+
+        if isinstance(pin, (int, float)):
+            pin_int = int(pin)
+            s = str(pin_int)
+            if len(s) == 8:
+                body = int(s[:7])
+                expected = self.checksum(body)
+                if int(s[7]) != expected:
+                    return s[:7] + str(expected)
+                return s
+            else:
+                val = pin_int % 10000000
+                bstr = str(val).zfill(7)
+                return bstr + str(self.checksum(int(bstr)))
+
+        return str(pin)
 
     def getAll(self, mac, get_static=True):
         res = []
@@ -5900,7 +5928,7 @@ class WiFiScanner:
                 if _scan_attempt < _max_scan_retries:
                     time.sleep(2)
                 else:
-                    return False
+                    return {}
         networks = []
 
         # Map pre-compiled class-level patterns to local handler functions.
@@ -5928,7 +5956,7 @@ class WiFiScanner:
         for line in lines:
             if line.startswith('command failed:'):
                 print(f'{err} Error: {line}')
-                return False
+                return {}
             line = line.strip('\t')
             for regexp, handler in matchers.items():
                 res = regexp.match(line)
@@ -5962,7 +5990,7 @@ class WiFiScanner:
                       f'(too weak/far -- use --min-rssi to adjust)')
 
         if not networks:
-            return False
+            return {}
 
         # Ordering strategy:
         #   --prefer-close  : sort by descending RSSI (nearest AP first).
