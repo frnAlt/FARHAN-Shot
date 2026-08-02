@@ -2,6 +2,7 @@ A9UF A9UF
 ADSL RT2860
 ADSL Router EV-2006-07-27
 AIR3G WSC Wireless Access Point AIR3G WSC Device
+ASUS RT-AC1200
 ASUS RT-AC3200 1.0
 ASUS RT-AC51U 1.0
 ASUS RT-AC53 1.0
@@ -11,8 +12,10 @@ ASUS RT-AC68U 3.0
 ASUS RT-AC68U C1
 ASUS RT-AC87U 1.0
 ASUS RT-AC88U 1.0
+ASUS RT-AX53U
 ASUS RT-AX53U RT2860
 ASUS RT-AX53U RT2860 2.0
+ASUS RT-AX55
 ASUS RT-AX55 RT2860
 ASUS RT-AX55 RT2860 2.0
 ASUS RT-AX56U RT2860
@@ -35,6 +38,7 @@ ASUS RT-N10 C1
 ASUS RT-N10E C1
 ASUS RT-N10P 2.0
 ASUS RT-N11P B1
+ASUS RT-N12
 ASUS RT-N12 C1
 ASUS RT-N12 D1
 ASUS RT-N12HP B1
@@ -151,6 +155,9 @@ Asus Wireless Router RT-AC86U
 Asus Wireless Router RT-N56U
 Asus Wireless Router RT-N66U
 B-LINK 123456
+BDCOM GP1702
+BDCOM GP1704
+Belkin AC1200
 Belkin AP EV-2012-09-01
 Belkin F5D8233-4 4.0
 Belkin F7D1301 1.0
@@ -158,8 +165,12 @@ Belkin F7D2301 1.0
 Belkin F9K1001 2.0
 Belkin F9K1002 3.0
 Belkin F9K1105 1.0
+Belkin N300
 Belkin N300 DB 1.0
 Belkin N600 DB 1.0
+Cisco Linksys E1200
+Cisco Linksys E2500
+Cisco Linksys EA6350
 Comfast CF-E355AC 1.0
 Comfast CF-E375AC 1.0
 Comfast CF-WR625N 1.0
@@ -180,8 +191,15 @@ D-Link DAP-1320 B1
 D-Link DAP-1522 B1
 D-Link DAP-1650 A1
 D-Link DIR-2660 A1
+D-Link DIR-600M
+D-Link DIR-612
+D-Link DIR-615
 D-Link DIR-815 B1
+D-Link DIR-819
+D-Link DIR-825
 D-Link DIR-825 C1
+D-Link DIR-841
+D-Link DIR-842
 D-Link DIR-842 C1
 D-Link DIR-842 C2
 D-Link DIR-853 A1
@@ -258,13 +276,20 @@ Deco X60 1.0
 Deco X68 1.0
 Deco X90 1.0
 Deco XE75 1.0
+Digicom DG-W6001
+Digicom DG-W6400N
+Digicom DG-W9000
 EC120-F5 1.0
 EC220-G5 2.0
 EC230-G5 1.0
 EC330-G5 1.0
+EDIMAX BR-6428nS
 EV-2009-02-06
 Edimax Edimax
 Enhanced Wireless Router F6D4230-4 v1
+FiberHome AN5506
+FiberHome HG6145F
+FiberHome HG6821M
 GL.iNet GL-AR150 3.0
 GL.iNet GL-AR300M 3.0
 GL.iNet GL-AX1800 1.0
@@ -291,6 +316,7 @@ Huawei B535-232 1.0
 Huawei B535-235 1.0
 Huawei B618s-22d 1.0
 Huawei B628-265 1.0
+Huawei EG8141A5
 Huawei EG8141A5 1.0
 Huawei EG8145V5 1.0
 Huawei HG532c 1.0
@@ -301,18 +327,23 @@ Huawei HG532n 1.0
 Huawei HG532s 1.0
 Huawei HG658 V2
 Huawei HG659 1.0
+Huawei HG8145V5
 Huawei HG8145V5 1.0
 Huawei HG8245 1.0
+Huawei HG8245H
 Huawei HG8245H 1.0
 Huawei HG8245Q2 1.0
 Huawei HG8247H 1.0
 Huawei HG8247W5 1.0
+Huawei HG8546M
 Huawei HS8145V 1.0
 Huawei WS318n 1.0
+Huawei WS5200
 Huawei WS550 1.0
 Huawei WS5800 1.0
 Huawei WS7100 1.0
 Huawei WS7200 1.0
+Huawei WiFi AX3
 Huawei Wireless Access Point RT2860
 JWNR2000v2(Wireless AP) JWNR2000v2
 JWNR2010v5 JWNR2010v5
@@ -334,7 +365,10 @@ Keenetic Ultra KN-1810 1.0
 Keenetic Viva KN-1910 1.0
 LB-Link BL-AC1200 1.0
 LB-Link BL-WDR6300 1.0
+LB-Link BL-WR1300T
+LB-Link BL-WR2000
 LB-Link BL-WR3000A 1.0
+LB-Link BL-WR450H
 Linksys E1200 1.0
 Linksys E2500 3.0
 Linksys E3200 1.0
@@ -387,19 +421,28 @@ Mercury MW305R 1.0
 Mercury MW310R 1.0
 Mercury MW325R 1.0
 Mercury MW351R 1.0
+Mercusys AC12
 Mercusys AC12 3.0
 Mercusys AC1200 2.0
+Mercusys AC12G
 Mercusys AC12G 1.0
 Mercusys AC12G 2.0
 Mercusys MR20 1.0
 Mercusys MR20 2.0
+Mercusys MR30G
 Mercusys MR30G 1.0
 Mercusys MR30G 2.0
+Mercusys MR50G
 Mercusys MR50G 1.0
 Mercusys MR50G 2.0
+Mercusys MR70X
 Mercusys MR70X 1.0
 Mercusys MR80X 1.0
+Mercusys MW301R
+Mercusys MW302R
+Mercusys MW305R
 Mercusys MW305R 1.0
+Mercusys MW325R
 Mercusys MW325R 1.0
 Mercusys MW325R 2.0
 Mercusys MW325R 3.0
@@ -407,6 +450,10 @@ Mercusys MW330HP 1.0
 Mercusys MW330HP 2.0
 Mi Router 4A Mi Router 4A
 MiRouter 4A MiRouter 4A
+MikroTik hAP ac2
+MikroTik hAP ax2
+MikroTik hAP lite
+MikroTik hAP mini
 Modem/Router EV-2010-09-20
 N/A EV-2010-09-20
 NBG-419N NBG-419N
@@ -436,13 +483,20 @@ Netgear AP EV-2013-02-01
 Netgear AX1800 RT2860
 Netgear AX3000 RT2860
 Netgear AX5400 RT2860
+Netgear N300
+Netgear N600
+Netgear Nighthawk R7000
 Netgear Orbi RBR50 RT2860
 Netgear Orbi RBR750 RT2860
 Netgear Orbi RBS50 RT2860
+Netgear R6080
 Netgear R6100 1.0
+Netgear R6120
 Netgear R6200 2.0
+Netgear R6220
 Netgear R6300 2.0
 Netgear R6400 2.0
+Netgear R6700
 Netgear R7000 1.0
 Netgear R8000 1.0
 Netgear RAX10 RT2860
@@ -512,6 +566,8 @@ Ruijie RG-EW1200 1.0
 Ruijie RG-EW1800GX PRO 1.0
 Ruijie RG-EW3200GX PRO 1.0
 Ruijie Reyee RG-E5 1.0
+Ruijie Reyee RG-EW1200G
+Ruijie Reyee RG-EW300R
 Sagem F@ST 2504N 1.0
 Sagem F@ST 2704N 1.0
 Sagemcom F@ST 2704 1.0
@@ -587,6 +643,8 @@ TL-WR941HP 3.0
 TL-WR941N 6.0
 TL-WR949N 6.0
 TL-WR949N 7.0
+TP-Link Archer A5
+TP-Link Archer A6
 TP-Link Archer A7 5.0
 TP-Link Archer A9 6.0
 TP-Link Archer AX10 2.0
@@ -594,15 +652,31 @@ TP-Link Archer AX20 2.0
 TP-Link Archer AX50 2.0
 TP-Link Archer AX55 1.0
 TP-Link Archer AX73 2.0
+TP-Link Archer C20
+TP-Link Archer C24
+TP-Link Archer C50
+TP-Link Archer C54
+TP-Link Archer C6
 TP-Link Archer C6 5.0
+TP-Link Archer C60
 TP-Link Archer C7 4.0
+TP-Link Archer C80
 TP-Link Archer C80 2.0
 TP-Link Archer C9 4.0
+TP-Link Deco E4
+TP-Link Deco M4
+TP-Link Deco X20
 TP-Link TL-WR740N 6.0
 TP-Link TL-WR743ND 3.0
+TP-Link TL-WR840N
+TP-Link TL-WR841N
+TP-Link TL-WR841ND
 TP-Link TL-WR841ND 14.0
+TP-Link TL-WR845N
+TP-Link TL-WR940N
 TP-Link TL-WR940N 4.0
 TP-Link TL-WR940N 7.0
+TP-Link TL-WR941ND
 TP-Link TL-WR941ND 6.0
 Technicolor TC4400 1.0
 Technicolor TC7200 1.0
@@ -612,11 +686,14 @@ Technicolor TG582n 1.0
 Technicolor TG789vac v2
 Technicolor TG799vac 1.0
 Tenda 123456
+Tenda A9
+Tenda AC10
 Tenda AC10 1.0
 Tenda AC10 4.0
 Tenda AC10 5.0
 Tenda AC10 6.0
 Tenda AC10U 1.0
+Tenda AC11
 Tenda AC11 1.0
 Tenda AC1200 1.0
 Tenda AC15 1.0
@@ -625,15 +702,20 @@ Tenda AC15 3.0
 Tenda AC18 1.0
 Tenda AC18 15.0
 Tenda AC18 3.0
+Tenda AC19
 Tenda AC19 1.0
 Tenda AC21 3.0
 Tenda AC21 4.0
 Tenda AC23 1.0
 Tenda AC23 2.0
+Tenda AC5
 Tenda AC5 1.0
+Tenda AC6
 Tenda AC6 1.0
 Tenda AC6 2.0
+Tenda AC7
 Tenda AC7 1.0
+Tenda AC8
 Tenda AC8 1.0
 Tenda AC9 1.0
 Tenda AC9 15.0
@@ -644,10 +726,13 @@ Tenda AX3000 1.0
 Tenda AX6000 1.0
 Tenda F11 1.0
 Tenda F12 1.0
+Tenda F3
 Tenda F3 1.0
 Tenda F3 3.0
 Tenda F300 1.0
+Tenda F6
 Tenda F6 4.0
+Tenda F9
 Tenda F9 1.0
 Tenda F9 6.0
 Tenda MX12 1.0
@@ -655,9 +740,13 @@ Tenda MX3 1.0
 Tenda MX6 1.0
 Tenda N300 1.0
 Tenda N300 4.0
+Tenda N301
 Tenda N301 1.0
 Tenda N301 3.0
 Tenda N318 1.0
+Tenda RX3
+Tenda TX3
+Tenda TX9
 Tenda W18E 1.0
 Tenda W308R 1.0
 Tenda W30E 1.0
@@ -669,12 +758,16 @@ Thomson TG789vac 1.0
 Timo RA300R4 Timo RA300R4
 Totolink A2004NS 1.0
 Totolink A3002R 2.0
+Totolink A3002RU
 Totolink A6004NS 1.0
+Totolink A720R
 Totolink A720R 1.0
 Totolink A8000RU 1.0
 Totolink A950RG 1.0
 Totolink N150RT 5.0
+Totolink N200RE
 Totolink N200RE 4.0
+Totolink N300RT
 Totolink N300RT 5.0
 Totolink X5000R 1.0
 Totolink X5000R 2.0
@@ -741,10 +834,12 @@ Wavlink AX1800 1.0
 Wavlink AX3000 1.0
 Wavlink Aerial HD4 1.0
 Wavlink Aerial X 1.0
+Wavlink WL-WN530H4
 Wavlink WL-WN530HG4 1.0
 Wavlink WL-WN535K3 1.0
 Wavlink WL-WN551K1 1.0
 Wavlink WL-WN573HX3 1.0
+Wavlink WL-WN575A3
 Wavlink WL-WN579X3 1.0
 Wi-Fi Protected Setup Router RT-AC1200G+
 Wi-Fi Protected Setup Router RT-AX53U
@@ -809,10 +904,13 @@ Xiaomi Mi Router R4A 1.0
 Xiaomi Redmi Router AC2100 1.0
 Xiaomi Redmi Router AX5400 1.0
 Xiaomi Redmi Router AX6S 1.0
+ZTE F660
 ZTE F660 1.0
 ZTE F668 1.0
 ZTE F669 1.0
+ZTE F670
 ZTE F670 1.0
+ZTE F670L
 ZTE H108L 1.0
 ZTE H108N 1.0
 ZTE H108N 2.0
@@ -830,9 +928,11 @@ ZTE MF289F 1.0
 ZTE ZXHN F660 1.0
 ZTE ZXHN F668 1.0
 ZTE ZXHN F670L 1.0
+ZTE ZXHN H108N
 ZTE ZXHN H108N 1.0
 ZTE ZXHN H108N 2.0
 ZTE ZXHN H108N 3.0
+ZTE ZXHN H168N
 ZTE ZXHN H208N 1.0
 ZTE ZXHN H208N 2.0
 ZTE ZXHN H267N 1.0
@@ -872,3 +972,5 @@ ZyXEL VMG8825-T50K 1.0
 ZyXEL WSM20 1.0
 ZyXEL Wireless AP Router NBG-417N
 Zyxel NBG-460N 1.0
+Zyxel NBG6604
+Zyxel VMG1312
