@@ -1,6 +1,6 @@
 ================================================================
   FARHAN-Shot — Full Changelog & Commit History
-  Repository: github.com/Gtajisan/FARHAN-Shot
+  Repository: github.com/frnAlt/FARHAN-Shot
 ================================================================
 
 ----------------------------------------------------------------
@@ -282,7 +282,7 @@ WHAT WAS CHANGED:
    - The SHA-256 hash of the decoded banner bytes is stored as the
      constant _BANNER_SIG.
    - This hash covers all developer information including the
-     author name "FARHAN", the GitHub handle "Gtajisan", the
+     author name "FARHAN", the GitHub handle "frnAlt", the
      version number, and the tool credit line.
 
 5. _verify_banner_integrity() function:
@@ -308,7 +308,7 @@ WHAT WAS CHANGED:
      of which mode is used.
 
 RESULT:
-   If anyone changes "Gtajisan", "FARHAN", the version, or any
+   If anyone changes "frnAlt", "FARHAN", the version, or any
    developer information — whether in _BANNER_DATA or anywhere
    else — the SHA-256 will not match _BANNER_SIG and the script
    will immediately exit with:
