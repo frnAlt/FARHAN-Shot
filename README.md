@@ -162,7 +162,7 @@ sudo python3 main.py -i wlan0 -b AA:BB:CC:DD:EE:FF -K -w -o results.json
 | [rofl0r](https://github.com/rofl0r) | Initial OneShot implementation |
 | [Wiire](https://github.com/wiire-a) | pixiewps |
 | [fr0stb1rd](https://github.com/fr0stb1rd) | WPS PIN algorithms |
-| **frnAlt** | FARHAN-Shot — all enhancements |
+| **Gtajisan** | FARHAN-Shot — all enhancements |
 
 ---
 
