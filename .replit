@@ -1,29 +1,10 @@
-modules = ["python-3.11"]
+modules = ["python-3.12", "bash"]
 [agent]
 expertMode = true
+stack = "BEST_EFFORT_FALLBACK"
 
 [nix]
 channel = "stable-25_05"
 
-[workflows]
-runButton = "Project"
-
-[[workflows.workflow]]
-name = "Project"
-mode = "parallel"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "WPS Toolkit Demo"
-
-[[workflows.workflow]]
-name = "WPS Toolkit Demo"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "python3 main.py --dry-run --target 00:11:22:33:44:55 --pixie --bruteforce --verbose"
-
-[workflows.workflow.metadata]
-outputType = "console"
+[deployment]
+deploymentTarget = "cloudrun"
