@@ -61,7 +61,7 @@ sudo python3 main.py -i wlan0 -K
 
 **Option A: One-Liner Installer**
 ```bash
-curl -sSf https://raw.githubusercontent.com/frnAlt/FARHAN-Shot/master/installer.sh | bash
+curl -sSf https://raw.githubusercontent.com/frnAlt/FARHAN-Shot/core/installer.sh | bash
 ```
 
 **Option B: Manual Setup**
