@@ -5430,7 +5430,7 @@ class Companion:
 
         # Drain pending wpa_supplicant output (longer window to clear residual state)
         while True:
-            ready, _, _ = _select.select([self.wpas.stdout], [], [], 0.25)
+            ready, _, _ = _select.select([self.wpas.stdout], [], [], 0.02)
             if not ready:
                 break
             line = self.wpas.stdout.readline()
@@ -5447,10 +5447,10 @@ class Companion:
             # for the target so WPS_REG can associate on the first attempt.
             scan_cmd = f'SCAN freq={freq_mhz}' if freq_mhz else 'SCAN'
             self.sendOnly(scan_cmd)
-            time.sleep(1.0)   # give the scan time to complete before WPS_REG
+            time.sleep(0.15)   # fast frequency scan window before WPS_REG
             # drain scan output
             while True:
-                ready, _, _ = _select.select([self.wpas.stdout], [], [], 0.1)
+                ready, _, _ = _select.select([self.wpas.stdout], [], [], 0.01)
                 if not ready:
                     break
                 self.wpas.stdout.readline()
@@ -5474,7 +5474,7 @@ class Companion:
             if 'OK' in r:
                 break
             if _cmd_try < 2:
-                time.sleep(0.5)
+                time.sleep(0.15)
         if 'OK' not in r:
             self.connection_status.status = 'WPS_FAIL'
             print(self._explain_wpas_not_ok_status(cmd, r))
@@ -5516,20 +5516,19 @@ class Companion:
                 _deadline_extended = True
 
             # -- Per-message stall detection -------------------------------
-            # When we're past M2 but no new M-message has arrived for
-            # M_STALL_SEC seconds, the AP has gone silent mid-exchange.
-            # Cancel immediately and retry the same PIN -- no point burning
-            # the full remaining timeout waiting for a reply that won't come.
-            if _last_m >= 3 and _m_time > 0:
+            # When we're past M1 but no new M-message has arrived for
+            # M_STALL_SEC seconds (e.g. 6.0s for long distance / weak signal),
+            # the AP has gone silent mid-exchange due to frame drop.
+            # Cancel early so long distance / packet loss doesn't hang execution.
+            if _last_m >= 1 and _m_time > 0:
                 _stall_sec = _now - _m_time
-                _stall_limit = 15.0  # seconds -- generous for slow APs
+                _stall_limit = 6.0  # seconds -- fast failover on packet drop / long distance
                 if _stall_sec > _stall_limit:
-                    print(f'{warn} AP silent for {_stall_sec:.0f}s after M{_last_m} -- '
-                          f'cancelling early and retrying same PIN')
+                    print(f'{warn} Long distance / packet loss detected (AP silent for {_stall_sec:.0f}s after M{_last_m}) -- retrying')
                     self.connection_status.status = 'M_STALL'
                     break
 
-            ready, _, _ = _select.select([self.wpas.stdout], [], [], 0.1)
+            ready, _, _ = _select.select([self.wpas.stdout], [], [], 0.02)
             if not ready:
                 continue
             res = self.__handle_wpas(pixiemode=pixiemode, pbc_mode=pbc_mode, verbose=verbose)
@@ -5539,15 +5538,11 @@ class Companion:
                 break
             elif self.connection_status.status in ('WSC_NACK', 'WPS_FAIL'):
                 if pixiemode:
-                    # Drain remaining wpa_supplicant output for up to 1.5 s.
-                    # wpa_supplicant queues output lines -- when we see the NACK
-                    # or WPS-FAIL event, E-S1/E-S2 (and other late fields) may
-                    # still be sitting in the stdout pipe waiting to be read.
-                    # A generous window (1.5 s) ensures no crypto field is lost,
-                    # especially on slow Android/Termux kernels and busy channels.
-                    _drain_end = time.time() + 1.50
+                    _drain_end = time.time() + 0.8
                     while time.time() < _drain_end:
-                        _dr, _, _ = _select.select([self.wpas.stdout], [], [], 0.10)
+                        if self.pixie_creds.all_ok():
+                            break
+                        _dr, _, _ = _select.select([self.wpas.stdout], [], [], 0.02)
                         if _dr:
                             self.__handle_wpas(pixiemode=True,
                                                pbc_mode=False,
@@ -6301,28 +6296,40 @@ class WiFiScanner:
         else:
             cmd = f'iw dev {self.interface} scan'
         lines = []
-        _max_scan_retries = self.scan_retries
-        for _scan_attempt in range(1, _max_scan_retries + 1):
-            try:
-                proc = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE,
-                                      stderr=subprocess.STDOUT, encoding='utf-8', errors='replace',
-                                      timeout=35)
-                _out = proc.stdout or ''
-                if 'command failed' in _out:
-                    # Auto-remedy common interface down or RF-kill block errors
-                    if any(err_msg in _out for err_msg in ('Network is down', '-100', 'Device or resource busy', '-16', 'RF-kill', '-132')):
-                        subprocess.run(f'ip link set {self.interface} up 2>/dev/null', shell=True)
-                        subprocess.run('rfkill unblock wifi 2>/dev/null', shell=True)
+        # Real-time Wi-Fi fetch: attempt zero-delay scan dump first
+        try:
+            _dump_proc = subprocess.run(f'iw dev {self.interface} scan dump', shell=True,
+                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                        encoding='utf-8', errors='replace', timeout=2)
+            _dump_out = _dump_proc.stdout or ''
+            if 'BSS ' in _dump_out:
+                lines = _dump_out.splitlines()
+        except Exception:
+            pass
+
+        if not lines:
+            _max_scan_retries = self.scan_retries
+            for _scan_attempt in range(1, _max_scan_retries + 1):
+                try:
+                    proc = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE,
+                                          stderr=subprocess.STDOUT, encoding='utf-8', errors='replace',
+                                          timeout=25)
+                    _out = proc.stdout or ''
+                    if 'command failed' in _out:
+                        # Auto-remedy common interface down or RF-kill block errors
+                        if any(err_msg in _out for err_msg in ('Network is down', '-100', 'Device or resource busy', '-16', 'RF-kill', '-132')):
+                            subprocess.run(f'ip link set {self.interface} up 2>/dev/null', shell=True)
+                            subprocess.run('rfkill unblock wifi 2>/dev/null', shell=True)
+                        if _scan_attempt < _max_scan_retries:
+                            time.sleep(0.3 * _scan_attempt)
+                            continue
+                    lines = _out.splitlines()
+                    break
+                except subprocess.TimeoutExpired:
                     if _scan_attempt < _max_scan_retries:
-                        time.sleep(1.2 * _scan_attempt)
-                        continue
-                lines = _out.splitlines()
-                break
-            except subprocess.TimeoutExpired:
-                if _scan_attempt < _max_scan_retries:
-                    time.sleep(2)
-                else:
-                    return {}
+                        time.sleep(0.5)
+                    else:
+                        return {}
         networks = []
 
         # Map pre-compiled class-level patterns to local handler functions.
