@@ -9,10 +9,10 @@
 
 **FARHAN-Shot** — WPS Penetration Testing Tool
 
-[![Version](https://img.shields.io/badge/version-2.3.0-brightgreen)](https://github.com/Gtajisan/FARHAN-Shot)
+[![Version](https://img.shields.io/badge/version-2.3.0-brightgreen)](https://github.com/frnAlt/FARHAN-Shot)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Kali%20%7C%20Termux-blue)](https://termux.com)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
-[![Author](https://img.shields.io/badge/author-Gtajisan-informational)](https://github.com/Gtajisan)
+[![Author](https://img.shields.io/badge/author-frnAlt-informational)](https://github.com/frnAlt)
 
 > For authorized security testing only. Do not use on networks you don't own.
 
@@ -45,14 +45,14 @@ Python 3.6+   wpa_supplicant   pixiewps   iw   Root/sudo
 **Linux / Kali**
 ```bash
 sudo apt install -y wpasupplicant pixiewps iw python3
-git clone --depth 1 https://github.com/Gtajisan/FARHAN-Shot.git
+git clone --depth 1 https://github.com/frnAlt/FARHAN-Shot.git
 cd FARHAN-Shot
 sudo python3 main.py --help
 ```
 
 **Android / Termux — One-liner**
 ```bash
-curl -sSf https://raw.githubusercontent.com/Gtajisan/FARHAN-Shot_Termux_installer/master/installer.sh | bash
+curl -sSf https://raw.githubusercontent.com/frnAlt/FARHAN-Shot_Termux_installer/master/installer.sh | bash
 ```
 
 **Android / Termux — Manual**
@@ -60,7 +60,7 @@ curl -sSf https://raw.githubusercontent.com/Gtajisan/FARHAN-Shot_Termux_installe
 pkg update && pkg upgrade -y
 pkg install root-repo git tsu python wpa-supplicant pixiewps iw openssl -y
 termux-setup-storage
-git clone --depth 1 https://github.com/Gtajisan/FARHAN-Shot.git
+git clone --depth 1 https://github.com/frnAlt/FARHAN-Shot.git
 cd FARHAN-Shot
 sudo python3 main.py -i wlan0 -K
 ```
@@ -162,18 +162,18 @@ sudo python3 main.py -i wlan0 -b AA:BB:CC:DD:EE:FF -K -w -o results.json
 | [rofl0r](https://github.com/rofl0r) | Initial OneShot implementation |
 | [Wiire](https://github.com/wiire-a) | pixiewps |
 | [fr0stb1rd](https://github.com/fr0stb1rd) | WPS PIN algorithms |
-| **Gtajisan** | FARHAN-Shot — all enhancements |
+| **frnAlt** | FARHAN-Shot — all enhancements |
 
 ---
 
 <div align="center">
 
 <a href="https://youtu.be/5janYQg1-Yw?si=jua2TI2c_k9slAkC">YouTube</a> &nbsp;·&nbsp;
-<a href="https://github.com/Gtajisan/FARHAN-Shot">GitHub</a>
+<a href="https://github.com/frnAlt/FARHAN-Shot">GitHub</a>
 
-![](https://img.shields.io/github/stars/Gtajisan/FARHAN-Shot?style=social)
+![](https://img.shields.io/github/stars/frnAlt/FARHAN-Shot?style=social)
 &nbsp;
-![](https://img.shields.io/github/forks/Gtajisan/FARHAN-Shot?style=social)
+![](https://img.shields.io/github/forks/frnAlt/FARHAN-Shot?style=social)
 
 <sub>Built for security professionals. Use responsibly.</sub>
 

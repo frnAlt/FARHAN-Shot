@@ -134,7 +134,7 @@ def save_entry(ssid, pin, psk, file_path="store/FARHAN-Shot_crack_data.txt"):
         timestamp = now.strftime("%Y-%m-%d %I:%M:%S %p")
 
         entry = (
-            f"➠ TOOL: FARHAN-Shot by @Gtajisan \n"
+            f"➠ TOOL: FARHAN-Shot by @frnAlt \n"
             f"➠ SSID: {ssid}\n"
             f"➠ PIN: {pin}\n"
             f"➠ Pass: {psk}\n"
@@ -1784,7 +1784,7 @@ def die(msg):
 
 def usage():
     return """
-OneShot 0.0.2 (c) 2017 rofl0r, modded by Gtajisan 
+OneShot 0.0.2 (c) 2017 rofl0r, modded by frnAlt 
 
 %(prog)s <arguments>
 
@@ -1823,7 +1823,7 @@ if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser(
-        description='FARHAN-Shot 0.0.2 (c) 2017 rofl0r, modded by Gtajisan ',
+        description='FARHAN-Shot 0.0.2 (c) 2017 rofl0r, modded by frnAlt ',
         epilog='Example: %(prog)s -i wlan0 -b 00:90:4C:C1:AC:21 -K'
         )
 

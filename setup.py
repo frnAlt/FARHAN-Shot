@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Author: @Gtajisan 
-GitHub: https://github.com/Gtajisan /FARHAN-Shot
+Author: @frnAlt 
+GitHub: https://github.com/frnAlt /FARHAN-Shot
 License: MIT License
 Disclaimer:
     This tool is for educational and authorized penetration testing only.  
