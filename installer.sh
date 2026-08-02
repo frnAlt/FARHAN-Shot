@@ -25,7 +25,7 @@ echo -e "${RESET}"
 # ==========================
 # 🔧 Author Info
 # ==========================
-echo -e "${YELLOW}${BOLD}🔧 Author   : frn @frnAlt"
+echo -e "${YELLOW}${BOLD}🔧 Author   : frn @FARHAN_MUH_TASIM"
 echo -e "📡 Tool     : FARHAN-Shot"
 echo -e "📱 Requires : Rooted Android device with Termux${RESET}\n"
 sleep 1
@@ -55,7 +55,7 @@ run_step "Installing required packages" \
 "pkg install -y git tsu python wpa-supplicant pixiewps iw openssl"
 run_step "Requesting Termux storage permissions" "termux-setup-storage"
 run_step "Cloning FARHAN-Shot repository" \
-"git clone https://github.com/frnAlt/FARHAN-Shot"
+"git clone https://github.com/Gtajisan/FARHAN-Shot"
 
 # ==========================
 # ✅ Final Instructions

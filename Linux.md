@@ -88,7 +88,7 @@ Kali ships with all required tools. Just clone and run:
 
 ```bash
 # Clone the repository
-git clone https://github.com/frnAlt/FARHAN-Shot.git
+git clone https://github.com/Gtajisan/FARHAN-Shot.git
 cd FARHAN-Shot
 
 # Install any missing dependencies (usually not needed on Kali)
@@ -125,7 +125,7 @@ sudo apt install -y pixiewps
 # cd pixiewps && make && sudo make install && cd ..
 
 # Clone FARHAN-Shot
-git clone https://github.com/frnAlt/FARHAN-Shot.git
+git clone https://github.com/Gtajisan/FARHAN-Shot.git
 cd FARHAN-Shot
 
 # Run health check
@@ -154,7 +154,7 @@ yay -S pixiewps
 # sudo pacman -S blackarch-wireless
 
 # Clone FARHAN-Shot
-git clone https://github.com/frnAlt/FARHAN-Shot.git
+git clone https://github.com/Gtajisan/FARHAN-Shot.git
 cd FARHAN-Shot
 
 sudo python3 main.py --health -i wlan0
@@ -179,7 +179,7 @@ git clone https://github.com/wiire-a/pixiewps.git
 cd pixiewps && make && sudo make install && cd ..
 
 # Clone FARHAN-Shot
-git clone https://github.com/frnAlt/FARHAN-Shot.git
+git clone https://github.com/Gtajisan/FARHAN-Shot.git
 cd FARHAN-Shot
 
 sudo python3 main.py --health -i wlan0
@@ -954,4 +954,4 @@ SECURITY MASKING:
 ---
 
 *FARHAN-Shot v3.5.0 — For authorized security testing only.*  
-*GitHub: https://github.com/frnAlt/FARHAN-Shot*
+*GitHub: https://github.com/Gtajisan/FARHAN-Shot*

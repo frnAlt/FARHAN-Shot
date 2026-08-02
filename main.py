@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 """
 FARHAN-Shot v3.5.0 -- Advanced WPS Penetration Testing Framework
-Author  : frnAlt (frnAlt)
-GitHub  : https://github.com/frnAlt/FARHAN-Shot
+Author  : Gtajisan (FARHAN-MUH-TASIM)
+GitHub  : https://github.com/Gtajisan/FARHAN-Shot
 Based on: OneShot 0.0.2 (c) 2017 rofl0r
 OSE features from OneShot-Extended (c) chickendrop89
 License : MIT
@@ -359,7 +359,7 @@ def save_entry(ssid, pin, psk, file_path=None):
         now = datetime.now()
         timestamp = now.strftime("%Y-%m-%d %I:%M:%S %p")
         entry = (
-            f"➠ TOOL: FARHAN-Shot by @frnAlt \n"
+            f"➠ TOOL: FARHAN-Shot by @Gtajisan \n"
             f"➠ SSID: {ssid or 'N/A'}\n"
             f"➠ PIN: {pin or 'N/A'}\n"
             f"➠ Pass: {psk or 'N/A'}\n"
@@ -7418,7 +7418,7 @@ def die(msg):
 def usage():
     return """
 FARHAN-Shot v3.5.0 -- Advanced WPS Penetration Testing Framework
-Based on OneShot 0.0.2 (c) 2017 rofl0r | Enhanced by frnAlt
+Based on OneShot 0.0.2 (c) 2017 rofl0r | Enhanced by Gtajisan
 OSE features integrated from OneShot-Extended by chickendrop89
 
 %(prog)s <arguments>
