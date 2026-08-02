@@ -68,5 +68,5 @@ ${YELLOW}sudo python FARHAN-Shot/main.py -i wlan0 -K${RESET}
 
 💡 Replace ${MAGENTA}wlan0${RESET} with your actual wireless interface (e.g. wlan1, eth0).
 
-📬 Telegram Support: ${GREEN}@frnAlt${RESET}
+📬 Telegram Support: ${GREEN}@FARHAN_MUH_TASIM${RESET}
 "
