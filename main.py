@@ -1517,7 +1517,7 @@ def _auto_attack_plan(bssid: str, ssid: str = '', vuln_list: list = None) -> lis
     all_algos = gen._suggest(bssid)
     gen.algos['pinGeneric']['static'].clear()
     specific  = [a for a in all_algos
-                 if a not in ('pin24', 'pin28', 'pin32', 'pinGeneric')]
+                 if a not in ('pin24', 'pin28', 'pin32', 'pinGeneric', 'pinToken', 'pinNull', 'pinEmpty')]
     if specific:
         names = ', '.join(gen.algos[a]['name'] for a in specific[:3] if a in gen.algos)
         plan.append({
@@ -3761,7 +3761,7 @@ class WPSVulnEngine:
     _CHIPSET_PD: Dict[int, int] = {1: 55, 2: 42, 3: 30, 4: 35}
 
     # These algorithm IDs are "generic" -- they add no OUI-specific information
-    _GENERIC_ALGO_IDS = frozenset({'pin24', 'pin28', 'pin32', 'pinEmpty', 'pinGeneric'})
+    _GENERIC_ALGO_IDS = frozenset({'pin24', 'pin28', 'pin32', 'pinEmpty', 'pinGeneric', 'pinToken', 'pinNull'})
 
     def __init__(self):
         self._gen     = WPSpin()
@@ -3809,8 +3809,8 @@ class WPSVulnEngine:
             reasoning.append(
                 f'PD: OUI->{_cnames.get(chipset, f"mode-{chipset}")} chipset (+{bonus})')
         if model_vuln:
-            pd_score += 28
-            reasoning.append('PD: model confirmed in vuln DB (+28)')
+            pd_score += 36
+            reasoning.append('PD: model confirmed in vuln DB (+36)')
         if is_wps1:
             pd_score += 12
             reasoning.append('PD: WPS 1.0 -- older firmware RNG (+12)')
@@ -4126,7 +4126,7 @@ class RealTimeVulnAnalyzer:
 
         # Derive specific PIN candidates with labels
         gen        = WPSpin()
-        _GENERIC   = frozenset({'pin24', 'pin28', 'pin32', 'pinEmpty', 'pinGeneric'})
+        _GENERIC   = frozenset({'pin24', 'pin28', 'pin32', 'pinEmpty', 'pinGeneric', 'pinToken', 'pinNull'})
         algo_items = gen.getSuggested(bssid)
         specific_algos = [a for a in algo_items
                           if a.get('id', a.get('name', '')) not in _GENERIC]
@@ -6530,11 +6530,17 @@ class WiFiScanner:
                 dev_name, model)
 
             _net_bssid = network['BSSID'].upper()
+            _model_lo = model.lower().strip()
+            _is_in_vuln_list = bool(
+                self.vuln_list and _model_lo and
+                any(_model_lo in v.lower() or v.lower() in _model_lo
+                    for v in self.vuln_list if v)
+            )
             if ((_net_bssid, network['ESSID']) in self.stored) or (_net_bssid in _stored_bssids):
                 print(_colored(line, 'yellow'))
             elif network['WPS locked']:
                 print(_colored(line, 'red'))
-            elif self.vuln_list and (model.strip() in self.vuln_list):
+            elif _is_in_vuln_list:
                 print(_colored(line, 'green'))
             else:
                 # Use WPSVulnEngine score to flag likely-vulnerable networks even
@@ -6547,6 +6553,7 @@ class WiFiScanner:
                         wps_version='2.0' if network.get('WPS2') else '1.0',
                         locked=bool(network.get('WPS locked')),
                         wpa3=bool(network.get('WPA3')),
+                        vuln_list=self.vuln_list,
                     )
                     if _eng_score.vuln_score >= 55:
                         print(_colored(line, 'green'))
@@ -7157,8 +7164,8 @@ class WeakAlgorithmDetector:
     def analyze(self, bssid):
         suggested = self.generator.getSuggested(bssid)
         weak_algos = {
-            'pin24', 'pin28', 'pin32', 'pinEmpty', 'pinRealtek1',
-            'pinRealtek2', 'pinRealtek3', 'pinUpvel',
+            'pin24', 'pin28', 'pin32', 'pinEmpty', 'pinGeneric', 'pinToken', 'pinNull',
+            'pinRealtek1', 'pinRealtek2', 'pinRealtek3', 'pinUpvel',
         }
         strong_algos = {
             'pinArch', 'pinComtrend', 'pinHuawei', 'pinASUS',
