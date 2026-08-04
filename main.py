@@ -6090,9 +6090,9 @@ class WiFiScanner:
                 re.compile(r'SSID: (.*)'):                              'essid',
                 re.compile(r'signal: ([+-]?([0-9]*[.])?[0-9]+) dBm'):  'level',
                 re.compile(r'(capability): (.+)'):                      'security',
-                re.compile(r'(RSN):\t [*] Version: (\d+)'):            'security',
-                re.compile(r'(WPA):\t [*] Version: (\d+)'):            'security',
-                re.compile(r'WPS:\t [*] Version: (([0-9]*[.])?[0-9]+)'): 'wps',
+                re.compile(r'(RSN):	 [*] Version: (\d+)'):            'security',
+                re.compile(r'(WPA):	 [*] Version: (\d+)'):            'security',
+                re.compile(r'WPS:	 [*] Version: (([0-9]*[.])?[0-9]+)'): 'wps',
                 re.compile(r' [*] AP setup locked: (0x[0-9]+)'):       'wps_locked',
                 re.compile(r' [*] Model: (.*)'):                        'model',
                 re.compile(r' [*] Model Number: (.*)'):                 'model_number',
@@ -6107,7 +6107,7 @@ class WiFiScanner:
 
     def __init__(self, interface: str, vuln_list=None, channel_filter=None,
                  min_rssi=None, prefer_close=False, wps1_only=False,
-                 scan_retries=3, no_retry=False):
+                 scan_retries=3, no_retry=False, show_all=False):
         self.interface      = interface
         self.vuln_list      = vuln_list
         self.channel_filter = channel_filter  # int or None
@@ -6115,21 +6115,13 @@ class WiFiScanner:
         self.prefer_close   = prefer_close    # sort by descending signal strength
         self.wps1_only      = wps1_only       # only show WPS 1.0 (non-WPS2) networks
         self.scan_retries   = 1 if no_retry else max(1, scan_retries)
+        self.show_all       = show_all
         self._freq_cache: Dict[str, int] = {}  # BSSID -> MHz from last scan
 
-        # BUG FIX: was row[2] (Vendor) -- should be row[3] (ESSID).
-        # CSV columns: [Date, BSSID, Vendor, ESSID, PIN, PSK]
         self.stored = self._load_stored_set()
 
     @staticmethod
     def _load_stored_set() -> set:
-        """Return a set of (BSSID, ESSID) tuples from reports/stored.csv.
-
-        Used to mark previously-cracked networks yellow in the scan table.
-        Also checks store/FARHAN-Shot_crack_data.txt so targets cracked in
-        the current session (before reports/stored.csv is written) are still
-        marked correctly when the table is refreshed.
-        """
         result: set = set()
         reports_fname = os.path.dirname(os.path.realpath(__file__)) + '/reports/stored.csv'
         try:
@@ -6138,7 +6130,6 @@ class WiFiScanner:
                 rdr = csv.reader(f, delimiter=';', quoting=csv.QUOTE_ALL)
                 next(rdr)  # skip header row
                 for row in rdr:
-                    # columns: [Date, BSSID, Vendor, ESSID, PIN, PSK]
                     if len(row) >= 4:
                         bssid = (row[1] or '').strip().upper()
                         essid = (row[3] or '').strip()
@@ -6148,7 +6139,6 @@ class WiFiScanner:
             pass
         except Exception:
             pass
-        # Also scan the legacy crack-data store so same-session cracks appear yellow
         crack_store = os.path.join(
             os.path.dirname(os.path.realpath(__file__)), 'store',
             'FARHAN-Shot_crack_data.txt')
@@ -6158,11 +6148,8 @@ class WiFiScanner:
                     cur_ssid = cur_bssid = ''
                     for line in f:
                         line = line.strip()
-                        if line.startswith('\u27a0 SSID:'):
+                        if line.startswith('➠ SSID:'):
                             cur_ssid  = line.split(':', 1)[1].strip()
-                        # crack_data.txt does not store BSSID, only SSID -- so we
-                        # can only do an SSID-only match as a fallback; this is
-                        # handled separately in _print_network_table below.
         except Exception:
             pass
         return result
@@ -6301,59 +6288,27 @@ class WiFiScanner:
                         'WPA3' if sec in ('Unknown', 'Open') else 'WPA2/WPA3')
                 networks[-1]['WPA3'] = True
 
-        if self.channel_filter:
-            # Map 2.4GHz (1-14) and 5GHz/6GHz channel numbers to frequency in MHz
-            ch = self.channel_filter
-            if ch == 14:
-                _scan_freq = 2484
-            elif 1 <= ch <= 13:
-                _scan_freq = 2407 + (ch * 5)
-            elif 36 <= ch <= 177:
-                _scan_freq = 5000 + (ch * 5)
-            else:
-                _scan_freq = 0
-            cmd = f'iw dev {self.interface} scan freq {_scan_freq}' if _scan_freq else f'iw dev {self.interface} scan'
-        else:
-            cmd = f'iw dev {self.interface} scan'
+        cmd  = 'iw dev {} scan'.format(self.interface)
         lines = []
-        # Real-time Wi-Fi fetch: attempt zero-delay scan dump first
-        try:
-            _dump_proc = subprocess.run(f'iw dev {self.interface} scan dump', shell=True,
-                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                        encoding='utf-8', errors='replace', timeout=2)
-            _dump_out = _dump_proc.stdout or ''
-            if 'BSS ' in _dump_out:
-                lines = _dump_out.splitlines()
-        except Exception:
-            pass
-
-        if not lines:
-            _max_scan_retries = self.scan_retries
-            for _scan_attempt in range(1, _max_scan_retries + 1):
-                try:
-                    proc = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE,
-                                          stderr=subprocess.STDOUT, encoding='utf-8', errors='replace',
-                                          timeout=25)
-                    _out = proc.stdout or ''
-                    if 'command failed' in _out:
-                        # Auto-remedy common interface down or RF-kill block errors
-                        if any(err_msg in _out for err_msg in ('Network is down', '-100', 'Device or resource busy', '-16', 'RF-kill', '-132')):
-                            subprocess.run(f'ip link set {self.interface} up 2>/dev/null', shell=True)
-                            subprocess.run('rfkill unblock wifi 2>/dev/null', shell=True)
-                        if _scan_attempt < _max_scan_retries:
-                            time.sleep(0.3 * _scan_attempt)
-                            continue
-                    lines = _out.splitlines()
-                    break
-                except subprocess.TimeoutExpired:
-                    if _scan_attempt < _max_scan_retries:
-                        time.sleep(0.5)
-                    else:
-                        return {}
+        _max_scan_retries = self.scan_retries
+        for _scan_attempt in range(1, _max_scan_retries + 1):
+            try:
+                proc = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE,
+                                      stderr=subprocess.STDOUT, encoding='utf-8', errors='replace',
+                                      timeout=35)
+                _out = proc.stdout or ''
+                if 'command failed' in _out and _scan_attempt < _max_scan_retries:
+                    time.sleep(1.5 * _scan_attempt)
+                    continue
+                lines = _out.splitlines()
+                break
+            except subprocess.TimeoutExpired:
+                if _scan_attempt < _max_scan_retries:
+                    time.sleep(2)
+                else:
+                    return False
         networks = []
 
-        # Map pre-compiled class-level patterns to local handler functions.
-        # Regexes are compiled once per process lifetime via _get_matchers().
         _label_to_handler = {
             'network':      handle_network,
             'essid':        handle_essid,
@@ -6376,25 +6331,18 @@ class WiFiScanner:
 
         for line in lines:
             if line.startswith('command failed:'):
-                print(f'{err} Scan error on {self.interface}: {line}')
-                if 'Network is down' in line:
-                    print(f'{info} Fix: Bring interface up with: sudo ip link set {self.interface} up')
-                elif 'RF-kill' in line:
-                    print(f'{info} Fix: Unblock WiFi RF-Kill with: sudo rfkill unblock wifi')
-                elif 'Device or resource busy' in line:
-                    print(f'{info} Fix: Kill process conflicts with: sudo python3 main.py -i {self.interface} -K -k')
-                return {}
-            line = line.strip('\t')
+                print(f'{err} Error: {line}')
+                return False
+            line = line.strip('	')
             for regexp, handler in matchers.items():
                 res = regexp.match(line)
                 if res:
                     handler(line, res, networks)
                     break
 
-        _total_raw_networks = len(networks)
-
-        # Filter: WPS only
-        networks = [x for x in networks if bool(x['WPS'])]
+        # Filter: WPS only (unless show_all is enabled)
+        if not self.show_all:
+            networks = [x for x in networks if bool(x['WPS'])]
 
         # Filter: WPS 1.0 only (--wps1-only flag) -- skip WPS 2.0 and locked APs
         if self.wps1_only:
@@ -6419,22 +6367,12 @@ class WiFiScanner:
                       f'(too weak/far -- use --min-rssi to adjust)')
 
         if not networks:
-            if _total_raw_networks > 0:
-                print(f'{warn} Found {_total_raw_networks} Wi-Fi network(s) in range, but none have WPS enabled.')
-            return {}
+            return False
 
-        # Ordering strategy:
-        #   --prefer-close  : sort by descending RSSI (nearest AP first).
-        #                     Prioritises targets most likely to complete a
-        #                     WPS handshake with a clean signal budget.
-        #   default         : preserve the natural order returned by `iw scan`
-        #                     (which reflects scan discovery order and lets the
-        #                     operator manually evaluate all visible APs).
         if self.prefer_close:
             networks.sort(key=lambda x: x['Level'], reverse=True)
 
         result = {(i + 1): n for i, n in enumerate(networks)}
-        # Populate freq cache so the attack loop can do targeted scans
         self._freq_cache = {n['BSSID']: n['Freq'] for n in networks if n.get('Freq')}
         return result
 
@@ -6444,12 +6382,7 @@ class WiFiScanner:
 
         networks = self.iw_scanner()
         if not networks:
-            print(f'{err} No WPS networks found on {self.interface}.')
-            print(f'{info} Troubleshooting checklist:\n'
-                  f'  1. Ensure interface is UP:  sudo ip link set {self.interface} up\n'
-                  f'  2. Unblock RF-Kill switches: sudo rfkill unblock wifi\n'
-                  f'  3. Kill conflicting daemons: sudo python3 main.py -i {self.interface} -K -k\n'
-                  f'  4. Test raw scan manually:  sudo iw dev {self.interface} scan')
+            print(f'{err} No WPS networks found.')
             return
 
         self._print_network_table(networks)
@@ -6466,7 +6399,7 @@ class WiFiScanner:
                     _ch_sel    = net.get('Channel', 0)
                     _band_sel  = net.get('Band', '')
                     _lvl_sel   = net.get('Level', -100)
-                    _ver_sel   = 'WPS 2.0' if net.get('WPS2') else 'WPS 1.0'
+                    _ver_sel   = 'WPS 2.0' if net.get('WPS2') else ('WPS 1.0' if net.get('WPS') else 'No WPS')
                     _vendor_sel = (net.get('Manufacturer', '')
                                    or _get_vendor(_bssid_sel) or '?')
                     _ch_str    = '{}/{}'.format(_ch_sel, _band_sel) if _ch_sel else _band_sel or '?'
@@ -6498,7 +6431,6 @@ class WiFiScanner:
             return text
 
         def truncateStr(s, length, postfix='…'):
-            """Truncate string to length, appending postfix if truncated."""
             if len(s) > length:
                 k = length - len(postfix)
                 s = s[:k] + postfix
@@ -6543,8 +6475,6 @@ class WiFiScanner:
             elif _is_in_vuln_list:
                 print(_colored(line, 'green'))
             else:
-                # Use WPSVulnEngine score to flag likely-vulnerable networks even
-                # when no external vuln-list file is loaded.
                 try:
                     _eng_score = WPSVulnEngine().score(
                         _net_bssid,
@@ -6562,7 +6492,6 @@ class WiFiScanner:
                 except Exception:
                     print(line)
 
-        # — post-scan summary line -----------------------------------------------
         _total   = len(items)
         _locked  = sum(1 for _, nw in items if nw.get('WPS locked'))
         _stored_c = sum(
@@ -6581,12 +6510,7 @@ class WiFiScanner:
         """Scan and print results without prompting for a target."""
         networks = self.iw_scanner()
         if not networks:
-            print(f'{err} No WPS networks found on {self.interface}.')
-            print(f'{info} Troubleshooting checklist:\n'
-                  f'  1. Ensure interface is UP:  sudo ip link set {self.interface} up\n'
-                  f'  2. Unblock RF-Kill switches: sudo rfkill unblock wifi\n'
-                  f'  3. Kill conflicting daemons: sudo python3 main.py -i {self.interface} -K -k\n'
-                  f'  4. Test raw scan manually:  sudo iw dev {self.interface} scan')
+            print(f'{err} No WPS networks found.')
             return
         self._print_network_table(networks)
 
@@ -8116,6 +8040,8 @@ if __name__ == '__main__':
                         help='Run a dictionary attack using PIN wordlist file')
     parser.add_argument('--scan-retries',           type=int, default=3, metavar='<n>',
                         help='Number of iw scan retries before giving up [3]')
+    parser.add_argument('-a', '--show-all',         action='store_true',
+                        help='Show all Wi-Fi networks in home menu scan table (including non-WPS APs)')
     parser.add_argument('--wps1-only',              action='store_true',
                         help='Only show/attack WPS 1.0 networks (skip WPS 2.0 and locked APs)')
     parser.add_argument('--show-rfkill',            action='store_true',
@@ -8344,7 +8270,8 @@ if __name__ == '__main__':
                               prefer_close=getattr(args, 'prefer_close', False),
                               wps1_only=getattr(args, 'wps1_only', False),
                               scan_retries=getattr(args, 'scan_retries', 3),
-                              no_retry=getattr(args, 'no_retry', False))
+                              no_retry=getattr(args, 'no_retry', False),
+                              show_all=getattr(args, 'show_all', False))
         os.system('clear')
         print(_load_banner())
         scanner.scan_only()
@@ -8379,7 +8306,8 @@ if __name__ == '__main__':
                                           prefer_close=getattr(args, 'prefer_close', False),
                                           wps1_only=getattr(args, 'wps1_only', False),
                                           scan_retries=getattr(args, 'scan_retries', 3),
-                                          no_retry=getattr(args, 'no_retry', False))
+                                          no_retry=getattr(args, 'no_retry', False),
+                                          show_all=getattr(args, 'show_all', False))
                     if not args.loop:
                         print(f'{info} BSSID not specified (--bssid) — scanning for available networks')
                     network_info = scanner.prompt_network()
