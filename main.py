@@ -5450,7 +5450,7 @@ class Companion:
 
         # Drain pending wpa_supplicant output (longer window to clear residual state)
         while True:
-            ready, _, _ = _select.select([self.wpas.stdout], [], [], 0.02)
+            ready, _, _ = _select.select([self.wpas.stdout], [], [], 0.25)
             if not ready:
                 break
             line = self.wpas.stdout.readline()
@@ -5467,10 +5467,10 @@ class Companion:
             # for the target so WPS_REG can associate on the first attempt.
             scan_cmd = f'SCAN freq={freq_mhz}' if freq_mhz else 'SCAN'
             self.sendOnly(scan_cmd)
-            time.sleep(0.15)   # fast frequency scan window before WPS_REG
+            time.sleep(1.0)   # give the scan time to complete before WPS_REG
             # drain scan output
             while True:
-                ready, _, _ = _select.select([self.wpas.stdout], [], [], 0.01)
+                ready, _, _ = _select.select([self.wpas.stdout], [], [], 0.1)
                 if not ready:
                     break
                 self.wpas.stdout.readline()
@@ -5494,7 +5494,7 @@ class Companion:
             if 'OK' in r:
                 break
             if _cmd_try < 2:
-                time.sleep(0.15)
+                time.sleep(0.5)
         if 'OK' not in r:
             self.connection_status.status = 'WPS_FAIL'
             print(self._explain_wpas_not_ok_status(cmd, r))
@@ -5536,19 +5536,20 @@ class Companion:
                 _deadline_extended = True
 
             # -- Per-message stall detection -------------------------------
-            # When we're past M1 but no new M-message has arrived for
-            # M_STALL_SEC seconds (e.g. 6.0s for long distance / weak signal),
-            # the AP has gone silent mid-exchange due to frame drop.
-            # Cancel early so long distance / packet loss doesn't hang execution.
-            if _last_m >= 1 and _m_time > 0:
+            # When we're past M2 but no new M-message has arrived for
+            # M_STALL_SEC seconds, the AP has gone silent mid-exchange.
+            # Cancel immediately and retry the same PIN -- no point burning
+            # the full remaining timeout waiting for a reply that won't come.
+            if _last_m >= 3 and _m_time > 0:
                 _stall_sec = _now - _m_time
-                _stall_limit = 6.0  # seconds -- fast failover on packet drop / long distance
+                _stall_limit = 15.0  # seconds -- generous for slow APs
                 if _stall_sec > _stall_limit:
-                    print(f'{warn} Long distance / packet loss detected (AP silent for {_stall_sec:.0f}s after M{_last_m}) -- retrying')
+                    print(f'{warn} AP silent for {_stall_sec:.0f}s after M{_last_m} -- '
+                          f'cancelling early and retrying same PIN')
                     self.connection_status.status = 'M_STALL'
                     break
 
-            ready, _, _ = _select.select([self.wpas.stdout], [], [], 0.02)
+            ready, _, _ = _select.select([self.wpas.stdout], [], [], 0.1)
             if not ready:
                 continue
             res = self.__handle_wpas(pixiemode=pixiemode, pbc_mode=pbc_mode, verbose=verbose)
@@ -5558,11 +5559,11 @@ class Companion:
                 break
             elif self.connection_status.status in ('WSC_NACK', 'WPS_FAIL'):
                 if pixiemode:
-                    _drain_end = time.time() + 0.8
+                    _drain_end = time.time() + 1.50
                     while time.time() < _drain_end:
                         if self.pixie_creds.all_ok():
                             break
-                        _dr, _, _ = _select.select([self.wpas.stdout], [], [], 0.02)
+                        _dr, _, _ = _select.select([self.wpas.stdout], [], [], 0.10)
                         if _dr:
                             self.__handle_wpas(pixiemode=True,
                                                pbc_mode=False,
