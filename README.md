@@ -68,8 +68,9 @@ curl -sSf https://raw.githubusercontent.com/frnAlt/FARHAN-Shot/core/installer.sh
 ```bash
 # 1. Update packages & install dependencies (use 'sudo' instead of obsolete 'tsu')
 pkg update && pkg upgrade -y
-pkg install root-repo git sudo python wpa-supplicant pixiewps iw openssl -y
-
+pkg install root-repo -y
+pkg install git python wpa-supplicant pixiewps iw openssl -y
+pkg install tsu -y
 # 2. Grant storage permissions
 termux-setup-storage
 
