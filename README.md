@@ -71,6 +71,7 @@ pkg update && pkg upgrade -y
 pkg install root-repo -y
 pkg install git python wpa-supplicant pixiewps iw openssl -y
 pkg install tsu -y
+
 # 2. Grant storage permissions
 termux-setup-storage
 
@@ -188,7 +189,7 @@ sudo python3 main.py -i wlan0 -b AA:BB:CC:DD:EE:FF -K -w -o results.json
 | [rofl0r](https://github.com/rofl0r) | Initial OneShot implementation |
 | [Wiire](https://github.com/wiire-a) | pixiewps |
 | [fr0stb1rd](https://github.com/fr0stb1rd) | WPS PIN algorithms |
-| **Gtajisan** | FARHAN-Shot — all enhancements |
+| **Gtajisan** | FARHAN-Shot — all enhancements main lead  |
 
 ---
 
