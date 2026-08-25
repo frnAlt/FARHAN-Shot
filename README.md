@@ -81,6 +81,18 @@ cd FARHAN-Shot
 sudo python3 main.py -i wlan0 -K
 ```
 
+**Option C: Quick Shortcut & Helper Scripts**
+```bash
+# Set up Root Matrix & verify su/sudo environment (Termux):
+bash assets/su.sh
+
+# Install FARHAN-Shot binary system-wide in Termux:
+python3 assets/setup.py install
+
+# Or launch directly with runner script:
+bash assets/FARHAN-Shot.sh
+```
+
 > **📱 Android Termux Quick Checklist:**
 > 1. Turn Wi-Fi OFF in Android settings (prevents Android OS from controlling the Wi-Fi card).
 > 2. Enable Android Location (GPS) services (required by Android kernel to expose Wi-Fi scan results).
@@ -94,7 +106,10 @@ sudo python3 main.py -i wlan0 -K
 # Update to latest version
 cd FARHAN-Shot && git pull
 
-# Uninstall
+# Uninstall via setup script (Termux)
+python3 assets/setup.py uninstall
+
+# Or remove repository directory
 sudo rm -rf FARHAN-Shot
 ```
 
@@ -151,6 +166,7 @@ sudo python3 main.py -i wlan0 -b AA:BB:CC:DD:EE:FF -K -w -o results.json
 | `-l` | Loop back to scan after each attack |
 | `-v` | Verbose wpa_supplicant output |
 | `--no-color` | Strip colors (good for logging) |
+| `--vuln-list` | Custom vulnerable device list file (default: `assets/vulnwsc.txt`) |
 | `--mtk-wifi` | MediaTek driver fix (Android) |
 | `--iface-down` | Bring interface down on exit |
 
@@ -168,6 +184,21 @@ sudo python3 main.py -i wlan0 -b AA:BB:CC:DD:EE:FF -K -w -o results.json
 | Pixie Dust fails to find PIN | Try `-F` or `--timeout 60` |
 | WPS locked | Use `-K` — needs only one handshake |
 | No networks found | Retry: `sudo python3 main.py --scan-only` |
+
+---
+
+## 📁 Repository Structure & Assets
+
+| Path | Description |
+|---|---|
+| `main.py` | Main WPS penetration testing engine and CLI entry point |
+| `installer.sh` | One-liner Termux installer script |
+| `assets/pins.csv` | Static WPS PIN database (3,336+ entries) |
+| `assets/vulnwsc.txt` | Known vulnerable WPS router model database |
+| `assets/vulnwsc_original.txt` | Original WPS vulnerability database archive |
+| `assets/su.sh` | Termux root matrix scanner and sudo environment setup script |
+| `assets/setup.py` | Termux installation and launcher setup script |
+| `assets/FARHAN-Shot.sh` | Quick launcher runner script |
 
 ---
 

@@ -12,8 +12,8 @@ Disclaimer:
 
 import os
 import sys
+import shutil
 import subprocess
-from colors import green, yellow, red, reset
 
 red = "\033[1;31m"
 green = "\033[1;32m"
@@ -50,37 +50,40 @@ def install_script():
     python_version = f"python{sys.version_info.major}.{sys.version_info.minor}"
 
     bin_path = os.path.join(prefix, 'bin', BIN_NAME)
-    lib_path = os.path.join(prefix, 'lib', python_version, SCRIPT_NAME)
+    lib_dir = os.path.join(prefix, 'lib', python_version)
+    lib_path = os.path.join(lib_dir, SCRIPT_NAME)
 
     launcher_code = f'''#!/data/data/com.termux/files/usr/bin/python3
 import runpy
 if __name__ == "__main__":
-    runpy.run_path("/data/data/com.termux/files/usr/lib/python3.12/main.py", run_name="__main__")
+    runpy.run_path("{lib_path}", run_name="__main__")
 '''
 
     try:
+        os.makedirs(os.path.join(prefix, 'bin'), exist_ok=True)
         with open(bin_path, 'w') as f:
             f.write(launcher_code)
         os.chmod(bin_path, 0o775)
         print_info(f"Launcher script installed at {bin_path}")
-        files_to_copy = [
-            '.flake8',
-            'config.txt',
-            'main.py',
-            'colors.py',
-            'update.py',
-            'vulnwsc.txt'
-        ]
 
-        for filename in files_to_copy:
-            src_path = filename
-            dst_path = os.path.join(prefix, 'lib', python_version, filename)
-            try:
-                with open(src_path, 'r') as src, open(dst_path, 'w') as dst:
-                    dst.write(src.read())
-                print_info(f"Copied {filename} to {dst_path}")
-            except Exception as e:
-                print_warn(f"Failed to copy {filename}: {e}")
+        assets_dir = os.path.dirname(os.path.realpath(__file__))
+        repo_dir = os.path.abspath(os.path.join(assets_dir, '..'))
+
+        # Copy main.py to lib
+        main_src = os.path.join(repo_dir, 'main.py')
+        if os.path.exists(main_src):
+            shutil.copy2(main_src, lib_path)
+            print_info(f"Copied main.py to {lib_path}")
+
+        # Copy assets folder to lib/assets
+        dst_assets = os.path.join(lib_dir, 'assets')
+        os.makedirs(dst_assets, exist_ok=True)
+        for item in os.listdir(assets_dir):
+            s = os.path.join(assets_dir, item)
+            d = os.path.join(dst_assets, item)
+            if os.path.isfile(s):
+                shutil.copy2(s, d)
+                print_info(f"Copied asset {item} to {d}")
 
         print_info(f"Installed successfully! Run the tool with: {BIN_NAME}")
         print_info("Showing usage:\n")
@@ -94,7 +97,9 @@ def uninstall_script():
     python_version = f"python{sys.version_info.major}.{sys.version_info.minor}"
 
     bin_path = os.path.join(prefix, 'bin', BIN_NAME)
-    lib_path = os.path.join(prefix, 'lib', python_version, SCRIPT_NAME)
+    lib_dir = os.path.join(prefix, 'lib', python_version)
+    lib_path = os.path.join(lib_dir, SCRIPT_NAME)
+    dst_assets = os.path.join(lib_dir, 'assets')
 
     for path in [bin_path, lib_path]:
         try:
@@ -105,9 +110,16 @@ def uninstall_script():
         except Exception as e:
             print_error(f"Error removing {path}: {e}")
 
+    if os.path.isdir(dst_assets):
+        try:
+            shutil.rmtree(dst_assets)
+            print_info(f"Removed assets directory: {dst_assets}")
+        except Exception as e:
+            print_error(f"Error removing assets: {e}")
+
 def main():
     if len(sys.argv) != 2:
-        print(f"{yellow}Usage: python3 setup.py [install | uninstall]{reset}")
+        print(f"{yellow}Usage: python3 assets/setup.py [install | uninstall]{reset}")
         sys.exit(1)
 
     cmd = sys.argv[1].lower()

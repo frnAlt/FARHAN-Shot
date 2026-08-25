@@ -76,6 +76,14 @@ FS_HIDE_MAC      = False
 
 __version__ = '3.5.0'
 
+def get_asset_path(filename: str) -> str:
+    """Return path to asset file, checking assets/ subdirectory first then project root."""
+    base_dir = os.path.dirname(os.path.realpath(__file__))
+    asset_path = os.path.join(base_dir, 'assets', filename)
+    if os.path.exists(asset_path):
+        return asset_path
+    return os.path.join(base_dir, filename)
+
 # ---------------------------------------------------------------------------
 # Logging setup -- writes timestamped records to two rotating log files:
 #   farhan_shot_debug.log  -- DEBUG level and above (all activity)
@@ -1364,10 +1372,9 @@ def _system_health_check(interface: str = '') -> dict:
     results['interface'] = ii
 
     # Data files ----------------------------------------------------------
-    sd    = os.path.dirname(os.path.realpath(__file__))
     files: dict = {}
     for fn in ('pins.csv', 'vulnwsc.txt'):
-        fp        = os.path.join(sd, fn)
+        fp        = get_asset_path(fn)
         files[fn] = os.path.getsize(fp) if os.path.exists(fp) else None
     results['files'] = files
 
@@ -2299,7 +2306,7 @@ class WPSpin:
 
     def _suggest(self, mac):
         """Get suggested algorithm IDs for a given MAC address."""
-        pins_csv = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'pins.csv')
+        pins_csv = get_asset_path('pins.csv')
         self.append_from_pin_csv(pins_csv, mac)
 
         mac = mac.replace(':', '').upper()
@@ -3765,8 +3772,7 @@ class WPSVulnEngine:
 
     def __init__(self):
         self._gen     = WPSpin()
-        self._pin_csv = os.path.join(
-            os.path.dirname(os.path.realpath(__file__)), 'pins.csv')
+        self._pin_csv = get_asset_path('pins.csv')
 
     def score(self, bssid: str, ssid: str = '', model: str = '',
               wps_version: str = '1.0', locked: bool = False,
@@ -7992,7 +7998,7 @@ if __name__ == '__main__':
     parser.add_argument('--timeout',       type=int, default=30, metavar='<seconds>',
                         help='Per-connection WPS handshake timeout [30]')
     parser.add_argument('--vuln-list',     type=str,
-                        default=os.path.dirname(os.path.realpath(__file__)) + '/vulnwsc.txt',
+                        default=get_asset_path('vulnwsc.txt'),
                         help='Custom vulnerable device list file')
     parser.add_argument('-l', '--loop',    action='store_true',
                         help='Return to scan after each attempt')
