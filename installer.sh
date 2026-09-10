@@ -13,11 +13,11 @@ BOLD='\033[1m'
 RESET='\033[0m'
 
 # ==========================
-# 🚀 Branded Banner
+# Branded Banner
 # ==========================
 echo -e "${CYAN}${BOLD}"
 echo "╔══════════════════════════════════════════════════════╗"
-echo "║              🚀 FARHAN Shot Installer                ║"
+echo "║               FARHAN Shot Installer                ║"
 echo "║         Rooted Termux • WiFi Tool Setup Script       ║"
 echo "╚══════════════════════════════════════════════════════╝"
 echo -e "${RESET}"
@@ -31,7 +31,7 @@ echo -e "📱 Requires : Rooted Android device with Termux${RESET}\n"
 sleep 1
 
 # ==========================
-# 🧩 Reusable Step Function
+#  Reusable Step Function
 # ==========================
 run_step() {
     echo -e "${BLUE}[•] $1...${RESET}"
@@ -46,7 +46,7 @@ run_step() {
 }
 
 # ==========================
-# 📦 Start Installation
+#  Start Installation
 # ==========================
 
 run_step "Updating Termux package lists" "pkg update -y && pkg upgrade -y"
@@ -58,9 +58,9 @@ run_step "Cloning FARHAN-Shot repository" \
 "git clone https://github.com/frnAlt/FARHAN-Shot"
 
 # ==========================
-# ✅ Final Instructions
+# Final Instructions
 # ==========================
-echo -e "${GREEN}${BOLD}🎉 Installation Complete!${RESET}"
+echo -e "${GREEN}${BOLD} Installation Complete!${RESET}"
 echo -e "${CYAN}${BOLD}
 To run the FARHAN Shot tool, use:
 
