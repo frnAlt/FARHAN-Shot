@@ -1681,7 +1681,31 @@ def _auto_smart_attack(companion, bssid: str, ssid: str = '', args=None) -> bool
 
 
 def isAndroid():
-    return bool(hasattr(sys, 'getandroidapilevel'))
+    """Detect whether the script is running inside an Android / Termux environment."""
+    return bool(
+        hasattr(sys, 'getandroidapilevel') or
+        os.path.exists('/system/build.prop') or
+        'TERMUX_VERSION' in os.environ or
+        os.environ.get('PREFIX', '').startswith('/data/data/com.termux') or
+        shutil.which('getprop') is not None
+    )
+
+
+def getAndroidApiLevel() -> int:
+    """Safely return Android API level across standard Python and Termux."""
+    if hasattr(sys, 'getandroidapilevel'):
+        try:
+            return int(sys.getandroidapilevel())
+        except Exception:
+            pass
+    try:
+        r = subprocess.run(['getprop', 'ro.build.version.sdk'],
+                           capture_output=True, text=True, timeout=2)
+        if r.returncode == 0 and r.stdout.strip().isdigit():
+            return int(r.stdout.strip())
+    except Exception:
+        pass
+    return 0
 
 
 def _graceful_sigterm(signum, frame):
@@ -1702,27 +1726,33 @@ class AndroidNetwork:
                 encoding='utf-8', stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
             if r.stdout.strip() == '1':
                 self.ENABLED_SCANNING = 1
-        except subprocess.CalledProcessError as e:
-            print(f"{err} Error retrieving scan state: {e}")
+        except Exception as e:
+            logger.debug('AndroidNetwork storeAlwaysScanState error: %s', e)
 
     def disableWifi(self, force_disable=False, whisper=False):
+        logger.debug('AndroidNetwork: disabling Wi-Fi (force=%s)', force_disable)
         try:
-            subprocess.run(['cmd', 'wifi', 'set-wifi-enabled', 'disabled'], check=True)
+            subprocess.run(['cmd', 'wifi', 'set-wifi-enabled', 'disabled'],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
             if self.ENABLED_SCANNING == 1 or force_disable:
-                subprocess.run(['cmd', '-w', 'wifi', 'set-scan-always-available', 'disabled'], check=True)
-            time.sleep(3)
-        except subprocess.CalledProcessError as e:
-            print(f"{err} Error disabling Wi-Fi: {e}")
+                subprocess.run(['cmd', '-w', 'wifi', 'set-scan-always-available', 'disabled'],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+            time.sleep(2)
+        except Exception as e:
+            logger.debug('AndroidNetwork disableWifi error: %s', e)
 
     def enableWifi(self, force_enable=False, whisper=False):
         if not whisper:
             print(f'{info} Android: enabling Wi-Fi')
+        logger.debug('AndroidNetwork: enabling Wi-Fi (force=%s)', force_enable)
         try:
-            subprocess.run(['cmd', 'wifi', 'set-wifi-enabled', 'enabled'], check=True)
+            subprocess.run(['cmd', 'wifi', 'set-wifi-enabled', 'enabled'],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
             if self.ENABLED_SCANNING == 1 or force_enable:
-                subprocess.run(['cmd', '-w', 'wifi', 'set-scan-always-available', 'enabled'], check=True)
-        except subprocess.CalledProcessError as e:
-            print(f"{err} Error enabling Wi-Fi: {e}")
+                subprocess.run(['cmd', '-w', 'wifi', 'set-scan-always-available', 'enabled'],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        except Exception as e:
+            logger.debug('AndroidNetwork enableWifi error: %s', e)
 
 
 # -- MAC address helper ----------------------------------------------------------
@@ -4483,22 +4513,35 @@ class PixiewpsData:
     def clear(self):
         self.__init__()
 
-    def got_all(self):
-        """True when all fields required for a standard Pixie Dust attack are
-        present AND have the correct byte length.
+    @staticmethod
+    def is_valid_hex(val: str, expected_len: int) -> bool:
+        """Verify that val is non-empty, pure hexadecimal, and has exact character length."""
+        if not val or len(val) != expected_len:
+            return False
+        return all(c in '0123456789ABCDEFabcdef' for c in val)
 
-        Length requirements (per WPS spec):
-          PKE / PKR  : 192 bytes (Diffie-Hellman public keys)
-          E-Nonce    :  16 bytes (Enrollee nonce)
-          AuthKey    :  32 bytes (HMAC-SHA-256 key)
-          E-Hash1/2  :  32 bytes (HMAC-SHA-256 commitments)
+    def validate_tokens(self) -> Dict[str, bool]:
+        """Defensive validation report for all critical and optional tokens."""
+        return {
+            'pke':     self.is_valid_hex(self.pke, 192 * 2),
+            'pkr':     self.is_valid_hex(self.pkr, 192 * 2),
+            'e_hash1': self.is_valid_hex(self.e_hash1, 32 * 2),
+            'e_hash2': self.is_valid_hex(self.e_hash2, 32 * 2),
+            'authkey': self.is_valid_hex(self.authkey, 32 * 2),
+            'e_nonce': self.is_valid_hex(self.e_nonce, 16 * 2),
+            'r_nonce': self.is_valid_hex(self.r_nonce, 16 * 2) if self.r_nonce else True,
+        }
+
+    def got_all(self):
+        """True when all fields required for standard Pixie Dust attack are
+        valid hexadecimal with exact specification lengths.
         """
-        return (len(self.pke)     == 192 * 2
-                and len(self.pkr)     == 192 * 2
-                and len(self.e_nonce) ==  16 * 2
-                and len(self.authkey) ==  32 * 2
-                and len(self.e_hash1) ==  32 * 2
-                and len(self.e_hash2) ==  32 * 2)
+        return (self.is_valid_hex(self.pke, 192 * 2)
+                and self.is_valid_hex(self.pkr, 192 * 2)
+                and self.is_valid_hex(self.e_nonce, 16 * 2)
+                and self.is_valid_hex(self.authkey, 32 * 2)
+                and self.is_valid_hex(self.e_hash1, 32 * 2)
+                and self.is_valid_hex(self.e_hash2, 32 * 2))
 
     def all_ok(self) -> bool:
         """Alias for got_all() to preserve backward compatibility."""
@@ -4625,6 +4668,22 @@ class PixiewpsData:
                 f"  Optional  : {',  '.join(opt_parts)}")
 
 
+class AttackResult:
+    """Structured result and error codes for WPS exchanges and attacks."""
+    SUCCESS         = 'SUCCESS'
+    GOT_PSK         = 'GOT_PSK'
+    TIMEOUT         = 'TIMEOUT'
+    WPS_LOCKED      = 'WPS_LOCKED'
+    WSC_NACK        = 'WSC_NACK'
+    WPS_FAIL        = 'WPS_FAIL'
+    MISSING_DATA    = 'MISSING_DATA'
+    INTERFACE_DOWN  = 'INTERFACE_DOWN'
+    NOT_VULNERABLE  = 'NOT_VULNERABLE'
+    M_STALL         = 'M_STALL'
+    WPAS_CRASH      = 'WPAS_CRASH'
+    ABORTED         = 'ABORTED'
+
+
 # -- Connection status tracker ---------------------------------------------------
 class ConnectionStatus:
     """Tracks the WPS exchange state as lines are consumed from wpa_supplicant."""
@@ -4632,7 +4691,8 @@ class ConnectionStatus:
     __slots__ = ('status', 'last_m_message', 'bssid', 'essid',
                  'wpa_psk', 'wps_locked', 'lock_wait', 'm_message_time',
                  'attempt_start_time', 'auth_failures',
-                 '_last_printed', '_scan_cycles', 'del_station_count')
+                 '_last_printed', '_scan_cycles', 'del_station_count',
+                 'error_code')
 
     def __init__(self):
         self.status            = ''
@@ -4648,6 +4708,7 @@ class ConnectionStatus:
         self._last_printed     = ''    # dedup: last message category printed
         self._scan_cycles      = 0     # count of scan->assoc->assoc'd cycles this attempt
         self.del_station_count = 0     # NL80211_CMD_DEL_STATION occurrences (de-auth events)
+        self.error_code        = ''    # AttackResult structured code
 
     def isFirstHalfValid(self) -> bool:
         return self.last_m_message > 5
@@ -4845,14 +4906,18 @@ class Companion:
     def sendOnly(self, command):
         if not hasattr(self, 'retsock') or self.retsock is None:
             self._init_client_socket()
-        try:
-            self.retsock.sendto(command.encode(), self.wpas_ctrl_path)
-        except (socket.error, OSError, Exception):
+        logger.debug('wpa_ctrl sendOnly: %s', command)
+        for attempt in range(2):
             try:
-                self._init_client_socket()
                 self.retsock.sendto(command.encode(), self.wpas_ctrl_path)
-            except Exception:
-                pass
+                return
+            except (socket.error, OSError) as e:
+                logger.debug('wpa_ctrl sendOnly attempt %d failed: %s', attempt + 1, e)
+                try:
+                    self._init_client_socket()
+                except Exception:
+                    pass
+                time.sleep(0.1)
 
     def sendAndReceive(self, command):
         if not hasattr(self, 'retsock') or self.retsock is None:
@@ -4861,14 +4926,17 @@ class Companion:
             try:
                 self.retsock.sendto(command.encode(), self.wpas_ctrl_path)
                 (b, address) = self.retsock.recvfrom(4096)
-                return b.decode('utf-8', errors='replace')
-            except (socket.timeout, socket.error, OSError, Exception):
+                resp = b.decode('utf-8', errors='replace').strip()
+                logger.debug('wpa_ctrl cmd="%s" -> resp="%s"', command, resp)
+                return resp
+            except (socket.timeout, socket.error, OSError) as exc:
+                logger.debug('wpa_ctrl cmd="%s" retry %d: %s', command, _attempt + 1, exc)
                 if _attempt < 2:
                     try:
                         self._init_client_socket()
                     except Exception:
                         pass
-                    time.sleep(0.3)
+                    time.sleep(0.2 * (2 ** _attempt))
         return ''
 
     @staticmethod
@@ -5933,12 +6001,33 @@ class Companion:
             return None
 
     def change_mac_address(self):
-        """Change MAC address (last octet) for each attempt."""
+        """Change MAC address with macchanger support and ip link fallback."""
         if not self.mac_changer:
             return
+        # Option 1: macchanger tool if installed
+        if shutil.which('macchanger'):
+            try:
+                subprocess.run(['ip', 'link', 'set', self.interface, 'down'],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3)
+                r = subprocess.run(['macchanger', '-e', self.interface],
+                                   capture_output=True, text=True, timeout=5)
+                subprocess.run(['ip', 'link', 'set', self.interface, 'up'],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3)
+                if r.returncode == 0:
+                    for ln in r.stdout.splitlines():
+                        if 'New MAC' in ln or 'Faked MAC' in ln:
+                            new_m = ln.split(': ', 1)[-1].strip() if ': ' in ln else ln.strip()
+                            print(f'{info} Changed MAC to: {new_m}')
+                            logger.debug('MAC changed via macchanger: %s', ln.strip())
+                            time.sleep(1)
+                            return
+            except Exception as e:
+                logger.debug('macchanger failed, falling back to ip link: %s', e)
+
+        # Option 2: Native ip link fallback
         try:
             result = subprocess.run(['ip', 'link', 'show', self.interface],
-                                    capture_output=True, text=True, check=True)
+                                    capture_output=True, text=True, check=True, timeout=3)
             current_mac = None
             for line in result.stdout.split('\n'):
                 if 'link/ether' in line:
@@ -5950,12 +6039,17 @@ class Companion:
             last_octet   = (int(mac_parts[5], 16) + 1) % 254 + 1
             mac_parts[5] = f'{last_octet:02x}'
             new_mac      = ':'.join(mac_parts)
-            subprocess.run(['ip', 'link', 'set', self.interface, 'down'],  check=False, capture_output=True)
-            subprocess.run(['ip', 'link', 'set', self.interface, 'address', new_mac], check=False, capture_output=True)
-            subprocess.run(['ip', 'link', 'set', self.interface, 'up'],    check=False, capture_output=True)
+            subprocess.run(['ip', 'link', 'set', self.interface, 'down'],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3)
+            subprocess.run(['ip', 'link', 'set', self.interface, 'address', new_mac],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3)
+            subprocess.run(['ip', 'link', 'set', self.interface, 'up'],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3)
             print(f'{info} Changed MAC to: {new_mac}')
+            logger.debug('MAC changed via ip link to %s', new_mac)
             time.sleep(1)
         except Exception as e:
+            logger.debug('Failed to change MAC: %s', e)
             if self.print_debug:
                 print(f'{warn} Failed to change MAC: {e}')
 
@@ -6850,14 +6944,15 @@ class RFKill:
                     with open(type_path, 'r') as tf:
                         if tf.read().strip() != 'wlan':
                             continue
-                    # write 1 to soft to unblock
+                    # In Linux kernel ABI: write '0' to unblock, '1' to block
                     with open(soft_path, 'w') as sf:
-                        sf.write('1\n')
+                        sf.write('0\n')
+                    logger.debug('RFKill: unblocked %s via sysfs write 0', soft_path)
                     unblocked_any = True
                 except (IOError, OSError):
                     continue
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug('RFKill _sysfs_unblock_wifi exception: %s', e)
         return unblocked_any
 
     @staticmethod
@@ -6873,6 +6968,7 @@ class RFKill:
                                    capture_output=True, text=True, timeout=5)
                 if r.returncode == 0:
                     print(f'{ok} RF-Kill unblocked for WiFi (rfkill tool, attempt {attempt})')
+                    logger.debug('RF-Kill unblocked for WiFi via tool on attempt %d', attempt)
                     return True
                 if attempt == 1:
                     print(f'{warn} rfkill unblock attempt {attempt} failed, retrying…')
@@ -6885,6 +6981,7 @@ class RFKill:
                 print(f'{err} sysfs unblock also failed - interface may stay blocked')
                 return False
             except Exception as e:
+                logger.debug('Error disabling RF-Kill (attempt %d): %s', attempt, e)
                 print(f'{err} Error disabling RF-Kill (attempt {attempt}): {e}')
                 if attempt < 2:
                     time.sleep(1)
@@ -6920,7 +7017,7 @@ class RFKill:
                     try:
                         with open(tp) as tf, open(st) as sf:
                             if tf.read().strip() == 'wlan':
-                                blocked = sf.read().strip() == '0'
+                                blocked = sf.read().strip() == '1'
                                 lines.append(f'{entry}: wlan  Soft blocked: {"yes" if blocked else "no"}')
                     except (IOError, OSError):
                         continue
@@ -7651,26 +7748,32 @@ class AdvancedPINAlgorithms:
 # -- Interface helpers ---------------------------------------------------------
 def ifaceUp(iface, down=False):
     action = 'down' if down else 'up'
+    logger.debug('ifaceUp called: interface=%s action=%s', iface, action)
+
     # Primary: ip link
     cmd = f'ip link set {iface} {action}'
     res = subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if res.returncode == 0:
         if not down:
-            subprocess.run('rfkill unblock wifi 2>/dev/null', shell=True)
+            RFKill.disable_rfkill(iface)
+        logger.debug('ifaceUp success via ip link: %s', iface)
         return True
 
     # Fallback 1: iw dev <iface> set type managed
     if not down:
-        subprocess.run('rfkill unblock wifi 2>/dev/null', shell=True)
+        RFKill.disable_rfkill(iface)
         subprocess.run(f'iw dev {iface} set type managed 2>/dev/null', shell=True)
         res = subprocess.run(f'ip link set {iface} up 2>/dev/null', shell=True)
         if res.returncode == 0:
+            logger.debug('ifaceUp success via iw + ip link: %s', iface)
             return True
 
     # Fallback 2: ifconfig
     ifconfig_action = 'down' if down else 'up'
     res = subprocess.run(f'ifconfig {iface} {ifconfig_action} 2>/dev/null', shell=True)
-    return res.returncode == 0
+    success = (res.returncode == 0)
+    logger.debug('ifaceUp fallback via ifconfig: %s (result=%s)', iface, success)
+    return success
 
 
 def _add_to_vuln_list(vuln_list_file: str, device_model: str, bssid: str, essid: str = '') -> None:
