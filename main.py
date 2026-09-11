@@ -1004,6 +1004,71 @@ def _snr_label(level: int, noise_floor: int = -95) -> str:
         return 'SNR:poor'
 
 
+def _channel_to_freq(channel: int) -> int:
+    """Convert an 802.11 channel number to frequency in MHz."""
+    if not channel:
+        return 0
+    try:
+        ch = int(channel)
+        if 1 <= ch <= 13:
+            return 2412 + (ch - 1) * 5
+        elif ch == 14:
+            return 2484
+        elif 36 <= ch <= 177:
+            return 5000 + ch * 5
+    except (ValueError, TypeError):
+        pass
+    return 0
+
+
+def _get_ap_frequency(interface: str, bssid: str) -> int:
+    """Query kernel scan dump cache for the exact frequency (MHz) of the target AP."""
+    if not interface or not bssid:
+        return 0
+    norm_target = bssid.upper().replace('-', ':').strip()
+    try:
+        r = subprocess.run(['iw', 'dev', interface, 'scan', 'dump'],
+                           capture_output=True, text=True, timeout=2)
+        if r.returncode == 0 and r.stdout:
+            cur_bssid = None
+            for line in r.stdout.splitlines():
+                line = line.strip()
+                if line.startswith('BSS '):
+                    m = re.search(r'([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}', line)
+                    cur_bssid = m.group(0).upper().replace('-', ':') if m else None
+                elif cur_bssid == norm_target and line.startswith('freq:'):
+                    parts = line.split()
+                    if len(parts) >= 2 and parts[1].isdigit():
+                        return int(parts[1])
+    except Exception:
+        pass
+    return 0
+
+
+def _get_ap_ssid(interface: str, bssid: str) -> str:
+    """Query kernel scan dump cache for the SSID of the target AP."""
+    if not interface or not bssid:
+        return ''
+    norm_target = bssid.upper().replace('-', ':').strip()
+    try:
+        r = subprocess.run(['iw', 'dev', interface, 'scan', 'dump'],
+                           capture_output=True, text=True, timeout=2)
+        if r.returncode == 0 and r.stdout:
+            cur_bssid = None
+            for line in r.stdout.splitlines():
+                line = line.strip()
+                if line.startswith('BSS '):
+                    m = re.search(r'([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}', line)
+                    cur_bssid = m.group(0).upper().replace('-', ':') if m else None
+                elif cur_bssid == norm_target and line.startswith('SSID:'):
+                    parts = line.split('SSID:', 1)
+                    if len(parts) == 2:
+                        return parts[1].strip()
+    except Exception:
+        pass
+    return ''
+
+
 def _ssid_pin_hint(ssid: str) -> List[str]:
     """Derive candidate WPS PINs from SSID naming patterns.
 
@@ -4938,6 +5003,7 @@ class Companion:
 
         self.generator      = WPSpin()
         self._current_bssid = ''
+        self._freq_cache    = {}
 
         self._vuln_list_file = self.advanced_options.get('vuln_list_file', None)
         self._save_ap        = self.advanced_options.get('save_ap', False)
@@ -5339,12 +5405,13 @@ class Companion:
             if '-> SCANNING' in line:
                 self.connection_status.status = 'scanning'
                 self.connection_status.record_phase('scanning')
-                # Count how many scan cycles have happened this attempt.
-                # Print the first 2 cycles normally; after that collapse
-                # repeated scan/associate/associated noise into a single
-                # rolling "retrying..." counter so the phone screen does not
-                # fill up with dozens of identical lines.
-                print(f'{info} Scanning…')
+                self.connection_status._scan_cycles += 1
+                if self.connection_status._scan_cycles == 1:
+                    print(f'{info} Scanning…')
+                elif self.connection_status._scan_cycles == 2:
+                    print(f'{info} Still scanning for target AP…')
+                else:
+                    logger.debug('wpa_supplicant re-scanning (cycle %d)', self.connection_status._scan_cycles)
         elif 'WPS-AP-SETUP-LOCKED' in line:
             self.connection_status.wps_locked = True
             self.connection_status.status = 'WPS_FAIL'
@@ -5678,6 +5745,10 @@ class Companion:
         self.connection_status.attempt_start_time = time.time()
         self.connection_status.bssid = bssid or ''
 
+        # Flush any stale state or ongoing connections in wpa_supplicant
+        self.sendOnly('WPS_CANCEL')
+        self.sendOnly('REMOVE_NETWORK all')
+
         # Drain pending wpa_supplicant output to clear any residual state from prior runs
         if hasattr(self, 'wpas_reader') and self.wpas_reader:
             self.wpas_reader.drain()
@@ -5695,10 +5766,15 @@ class Companion:
         # it finds the AP in one scan cycle instead of sweeping all channels.
         # This cuts the scan->associate->EAPOL delay from ~6 cycles to ~1.
         if not pbc_mode:
+            if not freq_mhz and bssid:
+                freq_mhz = self._freq_cache.get(bssid.upper()) or _get_ap_frequency(self.interface, bssid)
+                if freq_mhz:
+                    self._freq_cache[bssid.upper()] = freq_mhz
+
             scan_cmd = f'SCAN freq={freq_mhz}' if freq_mhz else 'SCAN'
             self.sendOnly(scan_cmd)
             # Adaptively wait for scan completion instead of arbitrary blind sleep
-            _scan_deadline = time.time() + (3.5 if freq_mhz else 6.0)
+            _scan_deadline = time.time() + (2.5 if freq_mhz else 5.0)
             while time.time() < _scan_deadline:
                 if hasattr(self, 'wpas_reader') and self.wpas_reader:
                     _sline = self.wpas_reader.readline(timeout=0.15)
@@ -5718,6 +5794,23 @@ class Companion:
                     if not _ready:
                         break
                     self.wpas.stdout.readline()
+
+            # Query wpa_supplicant BSS cache if frequency was previously unknown
+            if not freq_mhz and bssid:
+                try:
+                    _bss_info = self.sendAndReceive(f'BSS {bssid}')
+                    if _bss_info and 'FAIL' not in _bss_info:
+                        _mfreq = re.search(r'freq=(\d+)', _bss_info)
+                        if _mfreq:
+                            freq_mhz = int(_mfreq.group(1))
+                            self._freq_cache[bssid.upper()] = freq_mhz
+                            logger.debug('Resolved AP frequency %d MHz from wpa_supplicant BSS cache', freq_mhz)
+                        if not self.connection_status.essid:
+                            _mssid = re.search(r'ssid=(.+)', _bss_info)
+                            if _mssid:
+                                self.connection_status.essid = _mssid.group(1).strip()
+                except Exception:
+                    pass
 
         if pbc_mode:
             if bssid:
@@ -5790,6 +5883,32 @@ class Companion:
                 self.connection_status.error_code = AttackResult.WPAS_CRASH
                 break
 
+            # -- Early abort on unreachable AP (scan cycles exhausted without contact) --
+            # If wpa_supplicant has completed 3+ scan cycles without ever reaching
+            # authenticating or associating, and at least 10s have elapsed:
+            # The AP is unreachable, hidden, or out of range. Abort early instead
+            # of burning 35+ seconds stuck in a dead scanning loop.
+            if (self.connection_status._scan_cycles >= 3 and
+                    self.connection_status.last_m_message == 0 and
+                    'authenticating' not in self.connection_status.phase_timestamps and
+                    'associating' not in self.connection_status.phase_timestamps and
+                    (_now - self.connection_status.attempt_start_time) >= 10.0):
+                print(f'{warn} Target AP {bssid} not detected in range after '
+                      f'{self.connection_status._scan_cycles} scan cycles -- aborting attempt')
+                self.connection_status.status = 'WPS_FAIL'
+                self.connection_status.error_code = AttackResult.TIMEOUT
+                break
+
+            # -- Stall detection for silent association --
+            # AP associated but never began WPS exchange (no M-message) for > 15s
+            if (self.connection_status.last_m_message == 0 and
+                    'associating' in self.connection_status.phase_timestamps and
+                    (_now - self.connection_status.phase_timestamps['associating']) > 15.0):
+                print(f'{warn} AP associated but did not initiate WPS exchange within 15s -- aborting')
+                self.connection_status.status = 'WPS_FAIL'
+                self.connection_status.error_code = AttackResult.TIMEOUT
+                break
+
             # -- Deadline extension on first contact ----------------------
             # Once the AP has replied with M2 or later, we know it is alive
             # and worth waiting for. Extend deadline to ensure slow AP gets full window.
@@ -5832,9 +5951,10 @@ class Companion:
                             time.sleep(0.04)
                 break
 
-        # Cancel WPS and disconnect to cleanly reset internal state machine
+        # Cancel WPS, disconnect and clean networks to cleanly reset internal state machine
         self.sendOnly('WPS_CANCEL')
         self.sendOnly('DISCONNECT')
+        self.sendOnly('REMOVE_NETWORK all')
         if hasattr(self, 'wpas_reader') and self.wpas_reader:
             self.wpas_reader.drain()
         return False
@@ -5842,6 +5962,12 @@ class Companion:
     def single_connection(self, bssid=None, ssid=None, pin=None, pixiemode=False,
                           pbc_mode=False, showpixiecmd=False, pixieforce=False,
                           store_pin_on_fail=False, output_file=None, freq_mhz=None):
+        if not freq_mhz and bssid:
+            freq_mhz = self._freq_cache.get(bssid.upper()) or _get_ap_frequency(self.interface, bssid)
+            if freq_mhz:
+                self._freq_cache[bssid.upper()] = freq_mhz
+        if not ssid and bssid:
+            ssid = _get_ap_ssid(self.interface, bssid)
         if not pin:
             if pixiemode:
                 try:
@@ -6596,23 +6722,42 @@ class WiFiScanner:
                         'WPA3' if sec in ('Unknown', 'Open') else 'WPA2/WPA3')
                 networks[-1]['WPA3'] = True
 
-        cmd  = 'iw dev {} scan'.format(self.interface)
+        if self.channel_filter:
+            target_freq = _channel_to_freq(self.channel_filter)
+            cmd = f'iw dev {self.interface} scan freq {target_freq}' if target_freq else f'iw dev {self.interface} scan'
+        else:
+            cmd = f'iw dev {self.interface} scan'
         lines = []
         _max_scan_retries = self.scan_retries
         for _scan_attempt in range(1, _max_scan_retries + 1):
             try:
                 proc = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE,
                                       stderr=subprocess.STDOUT, encoding='utf-8', errors='replace',
-                                      timeout=35)
+                                      timeout=20)
                 _out = proc.stdout or ''
-                if 'command failed' in _out and _scan_attempt < _max_scan_retries:
-                    time.sleep(1.5 * _scan_attempt)
-                    continue
+                if 'command failed' in _out:
+                    # Device/resource busy (-16) or driver locked: try cached scan dump before sleeping
+                    dump_proc = subprocess.run(f'iw dev {self.interface} scan dump', shell=True,
+                                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                               encoding='utf-8', errors='replace', timeout=5)
+                    if dump_proc.stdout and 'BSS ' in dump_proc.stdout:
+                        lines = dump_proc.stdout.splitlines()
+                        break
+                    if _scan_attempt < _max_scan_retries:
+                        time.sleep(1.0 * _scan_attempt)
+                        continue
                 lines = _out.splitlines()
                 break
             except subprocess.TimeoutExpired:
+                # Active scan timed out -- try cached scan dump before giving up
+                dump_proc = subprocess.run(f'iw dev {self.interface} scan dump', shell=True,
+                                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                           encoding='utf-8', errors='replace', timeout=5)
+                if dump_proc.stdout and 'BSS ' in dump_proc.stdout:
+                    lines = dump_proc.stdout.splitlines()
+                    break
                 if _scan_attempt < _max_scan_retries:
-                    time.sleep(2)
+                    time.sleep(1.0)
                 else:
                     return False
         networks = []
@@ -6687,6 +6832,7 @@ class WiFiScanner:
     def prompt_network(self) -> Tuple[str, str, int]:
         os.system('clear')
         print(_load_banner())
+        print(f'{info} Scanning for wireless networks…')
 
         networks = self.iw_scanner()
         if not networks:
@@ -7435,10 +7581,24 @@ class AdvancedNetworkRecon:
             cmd = f'iw dev {self.interface} scan'
             r   = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE,
                                  stderr=subprocess.STDOUT,
-                                 encoding='utf-8', errors='replace')
-            return r.stdout
+                                 encoding='utf-8', errors='replace', timeout=15)
+            if r.stdout and 'BSS ' in r.stdout:
+                return r.stdout
+            # Fallback to cached scan dump if active scan produced no BSS records
+            r_dump = subprocess.run(f'iw dev {self.interface} scan dump', shell=True,
+                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                    encoding='utf-8', errors='replace', timeout=5)
+            return r_dump.stdout or ''
+        except subprocess.TimeoutExpired:
+            try:
+                r_dump = subprocess.run(f'iw dev {self.interface} scan dump', shell=True,
+                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                        encoding='utf-8', errors='replace', timeout=5)
+                return r_dump.stdout or ''
+            except Exception:
+                return ''
         except Exception as e:
-            print(f'{err} Advanced scan failed: {e}')
+            logger.debug('Advanced scan failed: %s', e)
             return ''
 
     def check_wps_enabled(self, bssid):
@@ -8647,6 +8807,14 @@ if __name__ == '__main__':
                             continue
 
                 if args.bssid:
+                    if not getattr(args, '_freq_mhz', 0):
+                        if getattr(args, 'channel', None):
+                            args._freq_mhz = _channel_to_freq(args.channel)
+                        if not getattr(args, '_freq_mhz', 0):
+                            args._freq_mhz = _get_ap_frequency(args.interface, args.bssid)
+                    if not getattr(args, 'ssid', None):
+                        args.ssid = _get_ap_ssid(args.interface, args.bssid)
+
                     # -- Optional pre-attack analysis (--advanced-recon / --detect-weak-algo)
                     if getattr(args, 'advanced_recon', False):
                         _rva_vuln_list: list = []
@@ -8733,7 +8901,8 @@ if __name__ == '__main__':
                             if companion.single_connection(
                                     bssid=args.bssid, ssid=args.ssid,
                                     pin=p, pixiemode=False,
-                                    output_file=getattr(args, 'output', None)):
+                                    output_file=getattr(args, 'output', None),
+                                    freq_mhz=getattr(args, '_freq_mhz', 0) or 0):
                                 success = True
                                 break
                             if args.delay:
