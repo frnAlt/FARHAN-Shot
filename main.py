@@ -1172,12 +1172,13 @@ def _chipset_mode_hint(bssid: str) -> Optional[int]:
     return _CHIPSET_MODE.get(bssid.replace(':', '').upper()[:6])
 
 
+@lru_cache(maxsize=1)
 def _check_pixiewps() -> Optional[str]:
     try:
         r = subprocess.run(
             ['pixiewps', '--version'],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            encoding='utf-8', errors='replace', timeout=5)
+            encoding='utf-8', errors='replace', timeout=3)
         first_line = (r.stdout or '').strip().splitlines()
         return first_line[0] if first_line else 'pixiewps (version unknown)'
     except FileNotFoundError:
@@ -1193,13 +1194,14 @@ def _check_nm_running() -> bool:
     ):
         try:
             if subprocess.run(cmd, stdout=subprocess.DEVNULL,
-                              stderr=subprocess.DEVNULL, timeout=3).returncode == 0:
+                              stderr=subprocess.DEVNULL, timeout=2).returncode == 0:
                 return True
         except Exception:
             pass
     return False
 
 
+@lru_cache(maxsize=1)
 def _is_kali() -> bool:
     """Return True if running on Kali Linux (any flavour including NetHunter)."""
     try:
@@ -1219,6 +1221,7 @@ def _is_kali() -> bool:
         return False
 
 
+@lru_cache(maxsize=1)
 def _distro_name() -> str:
     """Return a short distro label: Kali | Debian | Ubuntu | Arch | Fedora | Linux."""
     try:
@@ -1334,19 +1337,36 @@ def _interface_supports_wps(interface: str) -> bool:
 def _detect_interface() -> Optional[str]:
     """Try to auto-detect a suitable wireless interface.
 
-    Tries five methods in order (most reliable first):
-      1. iw dev           -- standard Linux / NetHunter / Termux
-      2. ip link          -- works when iw is absent
-      3. /sys/class/net   -- kernel sysfs (always present on Linux)
+    Checks kernel sysfs first for maximum launch speed (<1ms),
+    falling back to standard CLI tools:
+      1. /sys/class/net   -- kernel sysfs (fastest, pure Python)
+      2. iw dev           -- standard Linux / NetHunter nl80211 device
+      3. ip link          -- works when iw is absent
       4. /proc/net/dev    -- classic procfs fallback
       5. TermuxCompat     -- Android/Termux edge-case scanner
     """
     WLAN_PREFIXES = ('wlan', 'wlp', 'wlx', 'ath', 'ra', 'wifi', 'nl80211')
 
-    # 1. iw dev (best: also tells us the interface is a proper nl80211 device)
+    # 1. /sys/class/net (kernel sysfs -- zero subprocess overhead ~0.1ms)
+    try:
+        if os.path.isdir('/sys/class/net'):
+            for iface in sorted(os.listdir('/sys/class/net')):
+                if any(iface.startswith(p) for p in WLAN_PREFIXES):
+                    phy_path = f'/sys/class/net/{iface}/phy80211'
+                    wireless_path = f'/sys/class/net/{iface}/wireless'
+                    if os.path.exists(phy_path) or os.path.exists(wireless_path):
+                        return iface
+            # Second pass: name-prefix match even without the phy80211 symlink
+            for iface in sorted(os.listdir('/sys/class/net')):
+                if any(iface.startswith(p) for p in WLAN_PREFIXES):
+                    return iface
+    except Exception:
+        pass
+
+    # 2. iw dev (best nl80211 device query fallback)
     try:
         r = subprocess.run(['iw', 'dev'], stdout=subprocess.PIPE,
-                           stderr=subprocess.DEVNULL, encoding='utf-8', timeout=5)
+                           stderr=subprocess.DEVNULL, encoding='utf-8', timeout=2)
         for line in r.stdout.splitlines():
             m = re.match(r'\s+Interface\s+(\S+)', line)
             if m and m.group(1) not in ('lo',):
@@ -1354,31 +1374,16 @@ def _detect_interface() -> Optional[str]:
     except Exception:
         pass
 
-    # 2. ip link (skip loopback, look for wireless-named interfaces)
+    # 3. ip link (skip loopback, look for wireless-named interfaces)
     try:
         r = subprocess.run(['ip', '-o', 'link', 'show'], stdout=subprocess.PIPE,
-                           stderr=subprocess.DEVNULL, encoding='utf-8', timeout=5)
+                           stderr=subprocess.DEVNULL, encoding='utf-8', timeout=2)
         for line in r.stdout.splitlines():
             parts = line.split()
             if len(parts) >= 2:
                 iface = parts[1].rstrip(':').split('@')[0]
                 if any(iface.startswith(p) for p in WLAN_PREFIXES):
                     return iface
-    except Exception:
-        pass
-
-    # 3. /sys/class/net (kernel sysfs -- no tool required)
-    try:
-        for iface in sorted(os.listdir('/sys/class/net')):
-            if any(iface.startswith(p) for p in WLAN_PREFIXES):
-                phy_path = f'/sys/class/net/{iface}/phy80211'
-                wireless_path = f'/sys/class/net/{iface}/wireless'
-                if os.path.exists(phy_path) or os.path.exists(wireless_path):
-                    return iface
-        # Second pass: name-prefix match even without the phy80211 symlink
-        for iface in sorted(os.listdir('/sys/class/net')):
-            if any(iface.startswith(p) for p in WLAN_PREFIXES):
-                return iface
     except Exception:
         pass
 
@@ -1758,6 +1763,7 @@ def _auto_smart_attack(companion, bssid: str, ssid: str = '', args=None) -> bool
     return _bf_ok
 
 
+@lru_cache(maxsize=1)
 def isAndroid():
     """Detect whether the script is running inside an Android / Termux environment."""
     return bool(
@@ -1769,6 +1775,7 @@ def isAndroid():
     )
 
 
+@lru_cache(maxsize=1)
 def getAndroidApiLevel() -> int:
     """Safely return Android API level across standard Python and Termux."""
     if hasattr(sys, 'getandroidapilevel'):
@@ -1796,11 +1803,82 @@ def getAndroidApiLevel() -> int:
     return 0
 
 
-def _graceful_sigterm(signum, frame):
-    print(f'\n{warn} Caught signal {signum} -- shutting down cleanly…')
-    raise SystemExit(0)
+_ACTIVE_COMPANIONS: Set[object] = set()
 
-_signal.signal(_signal.SIGTERM, _graceful_sigterm)
+
+def _clean_exit_handler(signum=None, frame=None):
+    """Handle Ctrl+C (SIGINT) and SIGTERM cleanly and immediately.
+
+    Terminates wpa_supplicant child processes, restores network interfaces,
+    restores killed processes, and exits without hang or secondary prompts.
+    """
+    if getattr(_clean_exit_handler, '_exiting', False):
+        os._exit(0)
+    _clean_exit_handler._exiting = True
+
+    try:
+        print(f'\n{info} Interrupted by user (Ctrl+C). Exiting cleanly…')
+        sys.stdout.flush()
+    except Exception:
+        pass
+
+    # Terminate active wpa_supplicant and drain sockets
+    try:
+        for comp in list(_ACTIVE_COMPANIONS):
+            try:
+                comp.cleanup()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # Restore killed processes if requested
+    try:
+        _rkp = globals().get('_restore_killed_processes')
+        if callable(_rkp) and getattr(globals().get('args'), 'restore_procs', False):
+            _rkp()
+    except Exception:
+        pass
+
+    # Restore Android WiFi if running on Android and not --dont-touch-settings
+    try:
+        if isAndroid() and not globals().get('_dont_touch', False):
+            try:
+                AndroidNetwork().enableWifi(whisper=True)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # Down interface if --iface-down was specified
+    try:
+        _args = globals().get('args')
+        if _args and getattr(_args, 'iface_down', False) and getattr(_args, 'interface', None):
+            _ifu = globals().get('ifaceUp')
+            if callable(_ifu):
+                _ifu(_args.interface, down=True)
+    except Exception:
+        pass
+
+    # Reset MediaTek WiFi driver if --mtk-wifi was specified
+    try:
+        _args = globals().get('args')
+        if _args and getattr(_args, 'mtk_wifi', False):
+            Path('/dev/wmtWifi').write_text('0')
+    except Exception:
+        pass
+
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+    except Exception:
+        pass
+
+    os._exit(0)
+
+
+_signal.signal(_signal.SIGINT, _clean_exit_handler)
+_signal.signal(_signal.SIGTERM, _clean_exit_handler)
 
 
 # -- Android Wi-Fi management ----------------------------------------------------
@@ -5007,7 +5085,7 @@ class Companion:
 
         self._vuln_list_file = self.advanced_options.get('vuln_list_file', None)
         self._save_ap        = self.advanced_options.get('save_ap', False)
-
+        _ACTIVE_COMPANIONS.add(self)
         atexit.register(self.cleanup)
 
     def _init_client_socket(self):
@@ -5519,7 +5597,8 @@ class Companion:
             if showcmd:
                 print(f'{info} {cmd_str}')
             try:
-                r = subprocess.run(cmd_str, shell=True, stdout=subprocess.PIPE,
+                cmd_args = cmd_str.split()
+                r = subprocess.run(cmd_args, stdout=subprocess.PIPE,
                                    stderr=subprocess.PIPE, encoding='utf-8', errors='replace',
                                    timeout=timeout)
                 combined = (r.stdout or '') + ('\n' + r.stderr if r.stderr else '')
@@ -5540,27 +5619,23 @@ class Companion:
         if pin:
             return pin
 
-        # Pass 2: Chipset-hinted mode if available from BSSID OUI
-        chipset_hint = _chipset_mode_hint(self._current_bssid)
-        if chipset_hint is not None and chipset_hint not in (1, 2, 3):
-            chip_cmd = self.pixie_creds.get_pixie_cmd(full_range=full_range, mode=chipset_hint)
-            chip_out = _exec_cmd(chip_cmd, timeout=8)
-            pin = _extract_pin(chip_out)
-            if pin:
-                if chip_out.strip() and not showcmd:
-                    print(chip_out.strip())
-                return pin
+        # Extended passes are ONLY executed when explicitly requested with --pixie-force (-F)
+        if full_range:
+            chipset_hint = _chipset_mode_hint(self._current_bssid)
+            if chipset_hint is not None and chipset_hint not in (1, 2, 3):
+                print(f'{info} Pixie Force: testing chipset-hinted PRNG mode {chipset_hint}…')
+                chip_cmd = self.pixie_creds.get_pixie_cmd(full_range=True, mode=chipset_hint)
+                chip_out = _exec_cmd(chip_cmd, timeout=8)
+                pin = _extract_pin(chip_out)
+                if pin:
+                    if chip_out.strip() and not showcmd:
+                        print(chip_out.strip())
+                    return pin
 
-        # Pass 3: Experimental modes (4=eCos simplest, 5=eCos Knuth)
-        # Only run if user specified --pixie-force / full_range, or if pixiewps output
-        # indicates the AP might be vulnerable, with a strict timeout to avoid freezing on mobile.
-        stdout_lower = out_text.lower()
-        might_vulnerable = ('might' in stdout_lower and 'vulnerable' in stdout_lower)
-        if full_range or might_vulnerable:
-            if might_vulnerable and not full_range:
-                print(f'{warn} AP might be vulnerable — testing extended PRNG modes…')
             for mode in (4, 5):
-                mode_cmd = self.pixie_creds.get_pixie_cmd(full_range=full_range, mode=mode)
+                m_name = 'eCos simplest' if mode == 4 else 'eCos Knuth'
+                print(f'{info} Pixie Force: testing mode {mode} ({m_name})…')
+                mode_cmd = self.pixie_creds.get_pixie_cmd(full_range=True, mode=mode)
                 mode_out = _exec_cmd(mode_cmd, timeout=8)
                 pin = _extract_pin(mode_out)
                 if pin:
@@ -5568,15 +5643,18 @@ class Companion:
                         print(mode_out.strip())
                     return pin
 
-            if might_vulnerable and not full_range:
-                print(f'{warn} AP /might be/ vulnerable — retrying Pixiewps with --force …')
-                force_cmd = self.pixie_creds.get_pixie_cmd(full_range=True)
-                out_text2 = _exec_cmd(force_cmd, timeout=15)
-                if out_text2.strip():
-                    print(out_text2.strip())
-                pin = _extract_pin(out_text2)
-                if pin:
-                    return pin
+            print(f'{info} Pixie Force: running full keyspace sweep (--force)…')
+            force_cmd = self.pixie_creds.get_pixie_cmd(full_range=True)
+            out_text2 = _exec_cmd(force_cmd, timeout=15)
+            if out_text2.strip() and not showcmd:
+                print(out_text2.strip())
+            pin = _extract_pin(out_text2)
+            if pin:
+                return pin
+        else:
+            stdout_lower = out_text.lower()
+            if 'might' in stdout_lower and 'vulnerable' in stdout_lower:
+                print(f'{info} Hint: pixiewps reports AP may be vulnerable to extended modes. Retry with -F (--pixie-force)')
 
         return False
 
@@ -6011,7 +6089,7 @@ class Companion:
             except KeyboardInterrupt:
                 print("\nAborting…")
                 self.__savePin(bssid, pin)
-                return False
+                _clean_exit_handler()
         else:
             self.__wps_connection(bssid, pin, pixiemode, freq_mhz=freq_mhz)
 
@@ -6050,41 +6128,9 @@ class Companion:
                                                   store_pin_on_fail=True,
                                                   output_file=output_file, freq_mhz=freq_mhz)
                 logger.warning('Pixie Dust attack operational result: Pixiewps returned no PIN for BSSID %s', bssid)
-                print(f'{warn} Operational Result: [-] WPS pin not found! / Pixie Dust failed.')
+                print(f'{warn} Operational Result: [-] WPS pin not found! / Pixie Dust attack finished.')
                 print(f'{info} Note: Target router is likely immune to offline Pixie Dust (uses secure PRNG).')
-                print(f'{info} Automatically falling back to likely PIN and NULL PIN (00000000)…')
-                fallback_pins = []
-                likely = self.generator.getLikely(bssid) if bssid else None
-                if likely and likely != pin and likely not in fallback_pins:
-                    fallback_pins.append(likely)
-                try:
-                    suggested = self.generator.getSuggestedList(bssid)
-                    for sp in suggested:
-                        if sp and sp not in fallback_pins and sp != pin:
-                            fallback_pins.append(sp)
-                            if len(fallback_pins) >= 4:
-                                break
-                except Exception:
-                    pass
-                if '00000000' not in fallback_pins and pin != '00000000':
-                    fallback_pins.append('00000000')
-
-                for f_pin in fallback_pins:
-                    if self.connection_status.wps_locked:
-                        print(f'{warn} Target AP locked WPS — aborting fallback PIN attempts.')
-                        break
-                    time.sleep(0.8)
-                    print(f'{info} Fallback: Trying PIN {f_pin}…')
-                    logger.info('Pixie Dust fallback trying PIN %s for BSSID %s', f_pin, bssid)
-                    try:
-                        res = self.single_connection(bssid=bssid, ssid=ssid, pin=f_pin, pixiemode=False,
-                                                     store_pin_on_fail=store_pin_on_fail,
-                                                     output_file=output_file, freq_mhz=freq_mhz)
-                        if res:
-                            return res
-                    except KeyboardInterrupt:
-                        print("\nAborting fallback attempts…")
-                        return False
+                print(f'{info} Try: -F (--pixie-force) for full search, or online PIN modes (--auto / -B / -p <PIN>).')
                 return False
             else:
                 missing = self.pixie_creds.missing_critical()
@@ -6277,16 +6323,18 @@ class Companion:
                 s_half = mask[4:]
                 self.__second_half_bruteforce(bssid, f_half, s_half, delay)
             if self.connection_status.status != 'GOT_PSK':
-                raise KeyboardInterrupt
+                print(f'{warn} Keyspace exhausted without finding valid WPS PIN.')
+                return False
         except KeyboardInterrupt:
             print("\nAborting…")
-            filename = self.sessions_dir + '{}.run'.format(bssid.replace(':', '').upper())
-            with open(filename, 'w') as file:
-                file.write(self.bruteforce.mask)
-            print('[i] Session saved in {}'.format(filename))
-            # Check loop flag safely
-            if getattr(globals().get('args'), 'loop', False):
-                raise KeyboardInterrupt
+            try:
+                filename = self.sessions_dir + '{}.run'.format(bssid.replace(':', '').upper())
+                with open(filename, 'w') as file:
+                    file.write(self.bruteforce.mask)
+                print('[i] Session saved in {}'.format(filename))
+            except Exception:
+                pass
+            _clean_exit_handler()
 
     def save_session(self, bssid, current_pin_index=None, pins_tried=None):
         """Save attack session state for resumption."""
@@ -6484,6 +6532,10 @@ class Companion:
 
     def cleanup(self):
         try:
+            _ACTIVE_COMPANIONS.discard(self)
+        except Exception:
+            pass
+        try:
             if hasattr(self, 'retsock') and self.retsock:
                 self.retsock.close()
         except Exception:
@@ -6492,7 +6544,7 @@ class Companion:
             if hasattr(self, 'wpas') and self.wpas:
                 self.wpas.terminate()
                 try:
-                    self.wpas.wait(timeout=3)
+                    self.wpas.wait(timeout=1.0)
                 except Exception:
                     self.wpas.kill()
         except Exception:
@@ -6512,7 +6564,10 @@ class Companion:
                 pass
 
     def __del__(self):
-        pass
+        try:
+            self.cleanup()
+        except Exception:
+            pass
 
 
 # -- Wi-Fi scanner ----------------------------------------------------------------
@@ -7305,42 +7360,34 @@ class RFKill:
 
     @staticmethod
     def disable_rfkill(interface=None):
-        """Unblock WiFi via rfkill tool (with sysfs fallback).
+        """Unblock WiFi via rfkill tool (with fast sysfs fallback)."""
+        if not shutil.which('rfkill'):
+            if RFKill._sysfs_unblock_wifi():
+                logger.debug('RF-Kill unblocked via sysfs')
+                return True
+            return False
 
-        Retries once after 1 second if the first attempt fails so that a
-        briefly busy RF-Kill daemon does not permanently block the attack.
-        """
         for attempt in range(1, 3):
             try:
                 r = subprocess.run(['rfkill', 'unblock', 'wifi'],
-                                   capture_output=True, text=True, timeout=5)
+                                   capture_output=True, text=True, timeout=2)
                 if r.returncode == 0:
-                    print(f'{ok} RF-Kill unblocked for WiFi (rfkill tool, attempt {attempt})')
                     logger.debug('RF-Kill unblocked for WiFi via tool on attempt %d', attempt)
                     return True
                 if attempt == 1:
-                    print(f'{warn} rfkill unblock attempt {attempt} failed, retrying…')
-                    time.sleep(1)
-            except FileNotFoundError:
-                print(f'{warn} rfkill binary not found - trying sysfs fallback…')
-                if RFKill._sysfs_unblock_wifi():
-                    print(f'{ok} RF-Kill unblocked via sysfs')
-                    return True
-                print(f'{err} sysfs unblock also failed - interface may stay blocked')
-                return False
+                    time.sleep(0.2)
             except Exception as e:
                 logger.debug('Error disabling RF-Kill (attempt %d): %s', attempt, e)
-                print(f'{err} Error disabling RF-Kill (attempt {attempt}): {e}')
                 if attempt < 2:
-                    time.sleep(1)
-        print(f'{warn} Failed to disable RF-Kill after 2 attempts')
-        return False
+                    time.sleep(0.2)
+
+        return RFKill._sysfs_unblock_wifi()
 
     @staticmethod
     def enable_rfkill(interface=None):
         try:
             r = subprocess.run(['rfkill', 'block', 'wifi'],
-                               capture_output=True, text=True, timeout=5)
+                               capture_output=True, text=True, timeout=3)
             return r.returncode == 0
         except Exception:
             return False
@@ -7350,7 +7397,7 @@ class RFKill:
         """Return a human-readable RF-Kill status string, or None on error."""
         try:
             r = subprocess.run(['rfkill', 'list', 'wifi'],
-                               capture_output=True, text=True, timeout=5)
+                               capture_output=True, text=True, timeout=3)
             return r.stdout
         except FileNotFoundError:
             # Fallback: read sysfs
@@ -7377,7 +7424,6 @@ class RFKill:
 
     @staticmethod
     def is_blocked():
-        """Return True if any WiFi RF-Kill switch is software-blocked."""
         status = RFKill.check_rfkill_status()
         if status is None:
             return False
@@ -7387,13 +7433,10 @@ class RFKill:
 class NetworkManager:
     """NetworkManager (nmcli) integration."""
 
-    @staticmethod
-    def is_available():
-        try:
-            subprocess.run(['nmcli', '--version'], capture_output=True, timeout=2)
-            return True
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            return False
+    @classmethod
+    @lru_cache(maxsize=1)
+    def is_available(cls):
+        return shutil.which('nmcli') is not None
 
     @staticmethod
     def get_connections():
@@ -7863,8 +7906,9 @@ class TermuxCompat:
         'rfkill':         'rfkill',
     }
 
-    @staticmethod
-    def is_termux() -> bool:
+    @classmethod
+    @lru_cache(maxsize=1)
+    def is_termux(cls) -> bool:
         """Return True if we are running inside a Termux environment.
 
         Checks multiple indicators because /data/data/com.termux may not be
@@ -7879,8 +7923,9 @@ class TermuxCompat:
             os.path.isfile('/data/data/com.termux/files/usr/bin/python3')
         )
 
-    @staticmethod
-    def is_nethunter() -> bool:
+    @classmethod
+    @lru_cache(maxsize=1)
+    def is_nethunter(cls) -> bool:
         """Return True if running inside a Kali NetHunter / chroot environment."""
         return os.path.isdir('/sdcard/nh_files') or os.path.isfile('/etc/nethunter_version')
 
@@ -8113,33 +8158,58 @@ def ifaceUp(iface, down=False):
     action = 'down' if down else 'up'
     logger.debug('ifaceUp called: interface=%s action=%s', iface, action)
 
+    # Fast-path: If requested 'up' and interface is already UP, return True instantly (<0.2ms)
+    if not down and iface:
+        try:
+            flags_file = f'/sys/class/net/{iface}/flags'
+            if os.path.isfile(flags_file):
+                with open(flags_file, 'r') as _ff:
+                    if int(_ff.read().strip(), 16) & 0x1:
+                        logger.debug('ifaceUp: %s is already up (sysfs flags checked)', iface)
+                        return True
+            operstate_file = f'/sys/class/net/{iface}/operstate'
+            if os.path.isfile(operstate_file):
+                with open(operstate_file, 'r') as _of:
+                    if _of.read().strip() in ('up', 'unknown'):
+                        logger.debug('ifaceUp: %s is already up (operstate checked)', iface)
+                        return True
+        except Exception:
+            pass
+
     if isAndroid() and not down:
         try:
-            subprocess.run('svc wifi enable 2>/dev/null', shell=True)
+            subprocess.run(['svc', 'wifi', 'enable'],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1)
         except Exception:
             pass
 
     # Primary: ip link
-    cmd = f'ip link set {iface} {action}'
-    res = subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    cmd = ['ip', 'link', 'set', iface, action]
+    res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if res.returncode == 0:
-        if not down:
-            RFKill.disable_rfkill(iface)
         logger.debug('ifaceUp success via ip link: %s', iface)
         return True
 
     # Fallback 1: iw dev <iface> set type managed
     if not down:
-        RFKill.disable_rfkill(iface)
-        subprocess.run(f'iw dev {iface} set type managed 2>/dev/null', shell=True)
-        res = subprocess.run(f'ip link set {iface} up 2>/dev/null', shell=True)
+        subprocess.run(['iw', 'dev', iface, 'set', 'type', 'managed'],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        res = subprocess.run(['ip', 'link', 'set', iface, 'up'],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if res.returncode == 0:
             logger.debug('ifaceUp success via iw + ip link: %s', iface)
+            return True
+        # If ip link failed, only then attempt unblocking via rfkill
+        RFKill.disable_rfkill(iface)
+        res = subprocess.run(['ip', 'link', 'set', iface, 'up'],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if res.returncode == 0:
             return True
 
     # Fallback 2: ifconfig
     ifconfig_action = 'down' if down else 'up'
-    res = subprocess.run(f'ifconfig {iface} {ifconfig_action} 2>/dev/null', shell=True)
+    res = subprocess.run(['ifconfig', iface, ifconfig_action],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     success = (res.returncode == 0)
     logger.debug('ifaceUp fallback via ifconfig: %s (result=%s)', iface, success)
     return success
@@ -8976,18 +9046,13 @@ if __name__ == '__main__':
                 args.bssid = None
 
         except KeyboardInterrupt:
-            if args.loop:
-                if input(f"\n{ask} Exit the script (otherwise continue to AP scan)? [N/y] ").lower() == 'y':
-                    print(f"{info} Aborting…")
-                    break
-                else:
-                    args.bssid = None
-            else:
-                print(f"\n{info} Aborting…")
-                break
+            _clean_exit_handler()
         finally:
             if isAndroid() and not _dont_touch:
-                android_network.enableWifi()
+                try:
+                    android_network.enableWifi()
+                except Exception:
+                    pass
 
     if args.iface_down:
         ifaceUp(args.interface, down=True)

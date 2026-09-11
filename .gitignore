@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+log/
+reports/
+FARHAN-Shot.txt
+FARHAN-Shot_crack_data.txt
+*.run
