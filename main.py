@@ -1903,7 +1903,7 @@ class AndroidNetwork:
             if self.ENABLED_SCANNING == 1 or force_disable:
                 subprocess.run(['cmd', '-w', 'wifi', 'set-scan-always-available', 'disabled'],
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
-            time.sleep(2)
+            time.sleep(0.3)
         except Exception as e:
             logger.debug('AndroidNetwork disableWifi error: %s', e)
 
@@ -6650,7 +6650,7 @@ class WiFiScanner:
             pass
         return result
 
-    def iw_scanner(self) -> Dict[int, dict]:
+    def iw_scanner(self, force_fresh: bool = False) -> Dict[int, dict]:
         """Parse iw scan output into a structured network list."""
 
         def handle_network(line, result, networks):
@@ -6788,44 +6788,97 @@ class WiFiScanner:
                         'WPA3' if sec in ('Unknown', 'Open') else 'WPA2/WPA3')
                 networks[-1]['WPA3'] = True
 
-        if self.channel_filter:
-            target_freq = _channel_to_freq(self.channel_filter)
-            cmd = f'iw dev {self.interface} scan freq {target_freq}' if target_freq else f'iw dev {self.interface} scan'
-        else:
-            cmd = f'iw dev {self.interface} scan'
         lines = []
-        _max_scan_retries = self.scan_retries
-        for _scan_attempt in range(1, _max_scan_retries + 1):
+        # Fast path: query kernel in-memory BSS cache first if not explicitly forcing a fresh active scan
+        if not force_fresh:
             try:
-                proc = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE,
-                                      stderr=subprocess.STDOUT, encoding='utf-8', errors='replace',
-                                      timeout=20)
-                _out = proc.stdout or ''
-                if 'command failed' in _out:
-                    # Device/resource busy (-16) or driver locked: try cached scan dump before sleeping
-                    dump_proc = subprocess.run(f'iw dev {self.interface} scan dump', shell=True,
-                                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                               encoding='utf-8', errors='replace', timeout=5)
-                    if dump_proc.stdout and 'BSS ' in dump_proc.stdout:
-                        lines = dump_proc.stdout.splitlines()
+                dump_proc = subprocess.run(
+                    ['iw', 'dev', self.interface, 'scan', 'dump'],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    encoding='utf-8', errors='replace', timeout=2
+                )
+                _dump_out = dump_proc.stdout or ''
+                if 'BSS ' in _dump_out:
+                    lines = _dump_out.splitlines()
+            except Exception:
+                pass
+
+        if not lines:
+            if self.channel_filter:
+                target_freq = _channel_to_freq(self.channel_filter)
+                scan_cmd = ['iw', 'dev', self.interface, 'scan', 'freq', str(target_freq)] if target_freq else ['iw', 'dev', self.interface, 'scan']
+            else:
+                scan_cmd = ['iw', 'dev', self.interface, 'scan']
+
+            _max_scan_retries = min(2, self.scan_retries) if not getattr(self, 'no_retry', False) else 1
+            for _scan_attempt in range(1, _max_scan_retries + 1):
+                try:
+                    proc = subprocess.run(
+                        scan_cmd, stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT, encoding='utf-8', errors='replace',
+                        timeout=6
+                    )
+                    _out = proc.stdout or ''
+                    if 'command failed' in _out:
+                        # Device/resource busy (-16): background scan in progress or just finished -> check dump
+                        try:
+                            dump_proc = subprocess.run(
+                                ['iw', 'dev', self.interface, 'scan', 'dump'],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                encoding='utf-8', errors='replace', timeout=2
+                            )
+                            if dump_proc.stdout and 'BSS ' in dump_proc.stdout:
+                                lines = dump_proc.stdout.splitlines()
+                                break
+                        except Exception:
+                            pass
+
+                        # Auto-remedy common interface down or RF-kill block errors
+                        if any(err_msg in _out for err_msg in ('Network is down', '-100', 'RF-kill', '-132')):
+                            try:
+                                ifaceUp(self.interface)
+                                subprocess.run(['rfkill', 'unblock', 'wifi'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            except Exception:
+                                pass
+
+                        if _scan_attempt < _max_scan_retries:
+                            time.sleep(0.2)
+                            continue
+                    elif 'BSS ' in _out:
+                        lines = _out.splitlines()
                         break
+                    else:
+                        # Completed but BSS not in stdout: query scan dump cache
+                        try:
+                            dump_proc = subprocess.run(
+                                ['iw', 'dev', self.interface, 'scan', 'dump'],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                encoding='utf-8', errors='replace', timeout=2
+                            )
+                            if dump_proc.stdout and 'BSS ' in dump_proc.stdout:
+                                lines = dump_proc.stdout.splitlines()
+                                break
+                        except Exception:
+                            pass
+                        lines = _out.splitlines()
+                        break
+                except subprocess.TimeoutExpired:
+                    # Active scan timed out -- fetch whatever is in kernel scan dump cache immediately
+                    try:
+                        dump_proc = subprocess.run(
+                            ['iw', 'dev', self.interface, 'scan', 'dump'],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            encoding='utf-8', errors='replace', timeout=2
+                        )
+                        if dump_proc.stdout and 'BSS ' in dump_proc.stdout:
+                            lines = dump_proc.stdout.splitlines()
+                            break
+                    except Exception:
+                        pass
                     if _scan_attempt < _max_scan_retries:
-                        time.sleep(1.0 * _scan_attempt)
-                        continue
-                lines = _out.splitlines()
-                break
-            except subprocess.TimeoutExpired:
-                # Active scan timed out -- try cached scan dump before giving up
-                dump_proc = subprocess.run(f'iw dev {self.interface} scan dump', shell=True,
-                                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                           encoding='utf-8', errors='replace', timeout=5)
-                if dump_proc.stdout and 'BSS ' in dump_proc.stdout:
-                    lines = dump_proc.stdout.splitlines()
-                    break
-                if _scan_attempt < _max_scan_retries:
-                    time.sleep(1.0)
-                else:
-                    return False
+                        time.sleep(0.2)
+                    else:
+                        return False
         networks = []
 
         _label_to_handler = {
@@ -6895,12 +6948,15 @@ class WiFiScanner:
         self._freq_cache = {n['BSSID']: n['Freq'] for n in networks if n.get('Freq')}
         return result
 
-    def prompt_network(self) -> Tuple[str, str, int]:
+    def prompt_network(self, force_fresh: bool = False) -> Tuple[str, str, int]:
         os.system('clear')
         print(_load_banner())
-        print(f'{info} Scanning for wireless networks…')
+        if force_fresh:
+            print(f'{info} Refreshing wireless networks…')
+        else:
+            print(f'{info} Scanning for wireless networks…')
 
-        networks = self.iw_scanner()
+        networks = self.iw_scanner(force_fresh=force_fresh)
         if not networks:
             print(f'{err} No WPS networks found.')
             return
@@ -6911,7 +6967,7 @@ class WiFiScanner:
             try:
                 networkNo = input(f'{ask} Select target (press Enter to refresh): ')
                 if networkNo.lower() in ('r', '0', ''):
-                    return self.prompt_network()
+                    return self.prompt_network(force_fresh=True)
                 elif int(networkNo) in networks.keys():
                     net = networks[int(networkNo)]
                     _bssid_sel = net['BSSID']
@@ -6932,7 +6988,10 @@ class WiFiScanner:
                     return _bssid_sel, _essid_sel, net.get('Freq', 0)
                 else:
                     raise IndexError
-            except Exception:
+            except (KeyboardInterrupt, EOFError):
+                print()
+                sys.exit(0)
+            except (ValueError, IndexError, KeyError):
                 print(f'{err} Invalid number')
 
     def _print_network_table(self, network_list: Dict):
@@ -6971,6 +7030,9 @@ class WiFiScanner:
         if getattr(globals().get('args'), 'reverse_scan', False):
             items = items[::-1]
 
+        _vuln_list_lo = [v.lower() for v in self.vuln_list if v] if self.vuln_list else []
+        _vuln_engine = WPSVulnEngine()
+
         for n, network in items:
             number    = f'{n}| '
             model     = '{} {}'.format(network.get('Model', ''), network.get('Model number', ''))
@@ -6984,9 +7046,9 @@ class WiFiScanner:
             _net_bssid = network['BSSID'].upper()
             _model_lo = model.lower().strip()
             _is_in_vuln_list = bool(
-                self.vuln_list and _model_lo and
-                any(_model_lo in v.lower() or v.lower() in _model_lo
-                    for v in self.vuln_list if v)
+                _vuln_list_lo and _model_lo and
+                any(_model_lo in vlo or vlo in _model_lo
+                    for vlo in _vuln_list_lo)
             )
             if ((_net_bssid, network['ESSID']) in self.stored) or (_net_bssid in _stored_bssids):
                 print(_colored(line, 'yellow'))
@@ -6996,7 +7058,7 @@ class WiFiScanner:
                 print(_colored(line, 'green'))
             else:
                 try:
-                    _eng_score = WPSVulnEngine().score(
+                    _eng_score = _vuln_engine.score(
                         _net_bssid,
                         ssid=network.get('ESSID', ''),
                         model=model,
@@ -7632,25 +7694,19 @@ class AdvancedNetworkRecon:
     def get_extended_scan(self):
         """Get extended scan with manufacturer and channel info."""
         try:
-            cmd = f'iw dev {self.interface} scan'
-            r   = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE,
-                                 stderr=subprocess.STDOUT,
-                                 encoding='utf-8', errors='replace', timeout=15)
+            # Check fast cached scan dump first
+            r_dump = subprocess.run(['iw', 'dev', self.interface, 'scan', 'dump'],
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    encoding='utf-8', errors='replace', timeout=2)
+            if r_dump.stdout and 'BSS ' in r_dump.stdout:
+                return r_dump.stdout
+
+            r = subprocess.run(['iw', 'dev', self.interface, 'scan'],
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               encoding='utf-8', errors='replace', timeout=6)
             if r.stdout and 'BSS ' in r.stdout:
                 return r.stdout
-            # Fallback to cached scan dump if active scan produced no BSS records
-            r_dump = subprocess.run(f'iw dev {self.interface} scan dump', shell=True,
-                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                    encoding='utf-8', errors='replace', timeout=5)
             return r_dump.stdout or ''
-        except subprocess.TimeoutExpired:
-            try:
-                r_dump = subprocess.run(f'iw dev {self.interface} scan dump', shell=True,
-                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                        encoding='utf-8', errors='replace', timeout=5)
-                return r_dump.stdout or ''
-            except Exception:
-                return ''
         except Exception as e:
             logger.debug('Advanced scan failed: %s', e)
             return ''
