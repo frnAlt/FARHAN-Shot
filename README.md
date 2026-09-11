@@ -66,32 +66,63 @@ curl -sSf https://raw.githubusercontent.com/frnAlt/FARHAN-Shot/core/installer.sh
 
 **Option B: Manual Setup**
 ```bash
-# 1. Update packages & install dependencies (use 'sudo' instead of obsolete 'tsu')
+# 1. Update packages & install dependencies (including root-repo and sudo)
 pkg update && pkg upgrade -y
 pkg install root-repo -y
-pkg install git python wpa-supplicant pixiewps iw openssl -y
-pkg install tsu -y
+pkg install git python sudo wpa-supplicant pixiewps iw openssl -y
 
 # 2. Grant storage permissions
 termux-setup-storage
 
-# 3. Clone & run
+# 3. Clone & enter repository
 git clone --depth 1 https://github.com/frnAlt/FARHAN-Shot.git
 cd FARHAN-Shot
+
+# 4. Verify root permission & run
+# (If prompted by Magisk / KernelSU / APatch, tap GRANT)
 sudo python3 main.py -i wlan0 -K
 ```
 
 **Option C: Quick Shortcut & Helper Scripts**
 ```bash
-# Set up Root Matrix & verify su/sudo environment (Termux):
+# Enter FARHAN-Shot directory & make scripts executable:
+cd FARHAN-Shot
+chmod +x assets/*.sh
+
+# 1. Set up Root Matrix & fix sudo/su environment (Termux):
 bash assets/su.sh
 
-# Install FARHAN-Shot binary system-wide in Termux:
+# 2. Install FARHAN-Shot binary system-wide in Termux:
 python3 assets/setup.py install
 
-# Or launch directly with runner script:
+# Once installed system-wide, launch anytime from ANY directory:
+sudo FARHAN-Shot -i wlan0 -K
+
+# 3. Or launch directly with runner script:
 bash assets/FARHAN-Shot.sh
 ```
+
+> ⚠️ **Fixing Root / Sudo Detection Issues in Termux:**
+> - **`sudo: command not found`:**
+>   Make sure `root-repo` and `sudo` are installed:
+>   `pkg install root-repo -y && pkg install sudo -y`
+> - **Root not detected / Permission Denied (KernelSU / APatch / Magisk):**
+>   - **KernelSU / APatch:** Open the KernelSU or APatch app → Go to **Superuser** tab → Find **Termux** → Toggle **Grant root permission** to ON. *(KernelSU/APatch blocks root by default until explicitly granted)*.
+>   - **Magisk:** Open Magisk app → Go to **Superuser** tab (shield icon) → Ensure **Termux** is toggled ON.
+>   - **Trigger prompt manually:** Run `su` in Termux once. A Superuser permission dialog will appear on screen. Tap **Grant**, then type `exit`.
+> - **`python3: command not found` after running `su`:**
+>   Android's native `su` shell resets `$PATH` and loses Termux paths. Always export Termux PATH:
+>   `export PATH=/data/data/com.termux/files/usr/bin:$PATH`
+> - **Direct Root Shell Fallback (If `sudo` still has issues):**
+>   ```bash
+>   su -c "export PATH=/data/data/com.termux/files/usr/bin:\$PATH; cd $HOME/FARHAN-Shot && python3 main.py -i wlan0 -K"
+>   ```
+>   Or switch to root shell:
+>   ```bash
+>   su
+>   export PATH=/data/data/com.termux/files/usr/bin:$PATH
+>   cd ~/FARHAN-Shot && python3 main.py -i wlan0 -K
+>   ```
 
 > **📱 Android Termux Quick Checklist:**
 > 1. Turn Wi-Fi OFF in Android settings (prevents Android OS from controlling the Wi-Fi card).
@@ -184,6 +215,10 @@ sudo python3 main.py -i wlan0 -b AA:BB:CC:DD:EE:FF -K -w -o results.json
 | Pixie Dust fails to find PIN | Try `-F` or `--timeout 60` |
 | WPS locked | Use `-K` — needs only one handshake |
 | No networks found | Retry: `sudo python3 main.py --scan-only` |
+| Termux: `sudo: command not found` | `pkg install root-repo -y && pkg install sudo -y` |
+| Termux: Root not detected / permission denied | Open Magisk / KernelSU / APatch app → Superuser tab → Toggle Termux ON |
+| Termux: `python3: not found` after `su` | Run `export PATH=/data/data/com.termux/files/usr/bin:$PATH` |
+| Termux: `sudo` fails or hangs | Run `bash assets/su.sh` or use `su -c "PATH=$PATH python3 main.py -i wlan0 -K"` |
 
 ---
 

@@ -76,8 +76,8 @@ else
     warn "Some packages could not be updated. Continuing anyway..."
 fi
 
-# 3. Install sudo
-if run_with_spinner "Injecting sudo environment" pkg install sudo -y; then
+# 3. Install root-repo & sudo
+if run_with_spinner "Injecting root repository & sudo environment" bash -c "pkg install root-repo -y && pkg install sudo -y"; then
     success "Sudo framework successfully installed."
 else
     error "Failed to install sudo. Please check your internet connection or storage."
@@ -87,20 +87,23 @@ fi
 echo ""
 info "Initiating Root Matrix Scan..."
 
-# Known su binary paths
+# Known su binary paths (including Magisk, KernelSU, and APatch)
 SU_PATHS=(
     /system/bin/su
-    /debug_ramdisk/su
     /system/xbin/su
+    /data/adb/ksu/bin/su
+    /data/adb/ksu/su
+    /data/adb/ap/bin/su
+    /data/adb/apatch/su
+    /data/adb/magisk/su
+    /magisk/.core/bin/su
     /sbin/su
     /sbin/bin/su
     /system/sbin/su
     /su/xbin/su
     /su/bin/su
-    /magisk/.core/bin/su
     /system/product/bin/su
-    /data/adb/magisk/su
-    /data/adb/ksu/su
+    /debug_ramdisk/su
 )
 
 root_matrix() {
@@ -108,6 +111,16 @@ root_matrix() {
     if [[ "$(id -u 2>/dev/null)" == "0" ]]; then
         success "System is already running as ROOT (uid 0)."
         return 0
+    fi
+
+    # Check if su command in PATH grants root access
+    if command -v su >/dev/null 2>&1; then
+        local su_cmd
+        su_cmd="$(command -v su)"
+        if "$su_cmd" -c "id -u" 2>/dev/null | grep -q "^0$"; then
+            success "Valid root binary verified via PATH at: ${su_cmd}"
+            return 0
+        fi
     fi
 
     # Check sudo access
@@ -135,7 +148,7 @@ root_matrix() {
 
                 if [[ "$ans" =~ ^[Yy]$ ]]; then
                     echo -e "${C_B_GRN}Entering Root Matrix...${R}"
-                    exec "$path" -c "exec sh"   # Better: replace current shell
+                    exec "$path" -c "export PATH=/data/data/com.termux/files/usr/bin:\$PATH; exec sh"   # Preserves Termux PATH
                 else
                     echo ""
                     success "You can manually enter root later using:"
